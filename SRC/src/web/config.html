@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AES67 Config</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>AES67 / ST 2110-30 <small id="node">configuration</small></h1>
+  <nav><a href="/status">Status</a><a class="on" href="/config">Config</a></nav>
+  <span class="spacer"></span>
+  <button id="reload">Discard changes</button>
+  <button class="primary" id="save">Save &amp; apply</button>
+</header>
+<main>
+  <div class="banner" id="banner"></div>
+
+  <section><h2>Node &amp; network</h2>
+    <div class="form">
+      <label class="f">Node name (SDP / SAP prefix)<input id="node_name" placeholder="host name"></label>
+      <label class="f">Interface<select id="interface"></select></label>
+      <label class="f">Sample rate<select id="sample_rate">
+        <option value="48000">48 kHz (AES67 mandatory)</option><option value="96000">96 kHz</option>
+        <option value="44100">44.1 kHz</option><option value="88200">88.2 kHz</option></select></label>
+      <label class="f">Clock<select id="clock_source">
+        <option value="ptp">PTPv2 slave (built in)</option><option value="system">System CLOCK_TAI (host ptp4l)</option></select></label>
+      <label class="f">PTP domain<input id="ptp_domain" type="number" min="0" max="127"></label>
+      <label class="f">SAP announce our senders<select id="sap_announce"><option value="true">on</option><option value="false">off</option></select></label>
+      <label class="f">SAP browse the network<select id="sap_listen"><option value="true">on</option><option value="false">off</option></select></label>
+      <label class="f">SAP interval (s)<input id="sap_interval" type="number" min="5" max="300"></label>
+      <label class="f">Web port (restart to move)<input id="http_port" type="number" min="1" max="65535"></label>
+    </div>
+  </section>
+
+  <section><h2>Sound card (ALSA)</h2>
+    <div class="form">
+      <label class="f">Capture device (feeds senders)<select id="capture_device"></select></label>
+      <label class="f">Capture channels (0 = device default)<input id="capture_channels" type="number" min="0" max="256"></label>
+      <label class="f">Playback device (fed by receivers)<select id="playback_device"></select></label>
+      <label class="f">Playback channels (0 = device default)<input id="playback_channels" type="number" min="0" max="256"></label>
+      <label class="f">ALSA period, frames (0 = default)<input id="period_frames" type="number" min="0" max="8192"></label>
+    </div>
+    <p class="hint">Card channels are numbered from 1. A sender reading a channel the card lacks sends silence on it.</p>
+  </section>
+
+  <section><h2>Senders <span class="chip" id="tx-limit"></span></h2>
+    <p class="hint">Card channels as a list or range: <span class="mono">1-8</span>, <span class="mono">9,10</span>. Up to 8 per stream. ST 2110-30 needs a conformance level: A = 1 ms ≤ 8 ch, B/C = 125 µs.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>On</th><th>#</th><th>Name</th><th>Profile</th><th>Format</th><th>Packet</th><th>Multicast group</th><th>Port</th><th>TTL</th><th>PT</th><th>Card channels</th><th></th></tr></thead>
+      <tbody id="tx"></tbody>
+    </table></div>
+    <button id="add-tx" style="margin-top:10px">+ Add sender</button>
+  </section>
+
+  <section><h2>Receivers <span class="chip" id="rx-limit"></span></h2>
+    <p class="hint">Pick a stream heard over SAP (the receiver follows it if it moves), or paste an SDP. Routing lists the playback channel for each stream channel: <span class="mono">1-8</span>, or <span class="mono">3,4,-,-</span> to leave some unrouted.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>On</th><th>#</th><th>Name</th><th>Stream</th><th>Delay (ms)</th><th>→ Playback channels</th><th></th></tr></thead>
+      <tbody id="rx"></tbody>
+    </table></div>
+    <button id="add-rx" style="margin-top:10px">+ Add receiver</button>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let S = null, LIMITS = {sources: 16, sinks: 16, channels: 8}, SAP = [], openSdp = new Set();
+
+function token() { try { return localStorage.getItem('apk-aes67-token') || ''; } catch (e) { return ''; } }
+async function api(method, path, body) {
+  const headers = {'Content-Type': 'application/json'};
+  if (token()) headers.Authorization = 'Bearer ' + token();
+  const r = await fetch(path, {method, headers, body: body ? JSON.stringify(body) : undefined});
+  if (r.status === 401) {
+    const t = prompt('This node needs its API token (APK_AES67_TOKEN):');
+    if (t) { try { localStorage.setItem('apk-aes67-token', t); } catch (e) {} return api(method, path, body); }
+  }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+function banner(text, ok) {
+  const b = $('banner'); b.textContent = text; b.className = 'banner show ' + (ok ? 'ok' : 'err');
+  if (ok) setTimeout(() => b.className = 'banner', 4000);
+}
+
+// "1-4,7" <-> [0,1,2,3,6]; "-" entries are null (map only).
+function parseList(text, allowGaps) {
+  const out = [];
+  for (const part of text.split(',').map(s => s.trim()).filter(Boolean)) {
+    if (allowGaps && (part === '-' || part === '·')) { out.push(null); continue; }
+    const m = part.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+    if (!m) throw new Error(`“${part}” is not a channel or range`);
+    const a = +m[1], b = m[2] ? +m[2] : a;
+    if (a < 1 || b < a) throw new Error(`“${part}” is not a valid range (channels count from 1)`);
+    for (let c = a; c <= b; c++) out.push(c - 1);
+  }
+  if (out.length > LIMITS.channels) throw new Error(`${out.length} channels; a stream carries at most ${LIMITS.channels}`);
+  return out;
+}
+function listText(list) {
+  const ones = list.map(c => c == null ? null : c + 1);
+  if (ones.length > 1 && ones.every((c, i) => c != null && (i === 0 || c === ones[i - 1] + 1))) return `${ones[0]}-${ones[ones.length - 1]}`;
+  return ones.map(c => c ?? '-').join(',');
+}
+const opt = (v, label, cur) => `<option value="${esc(v)}"${String(v) === String(cur) ? ' selected' : ''}>${esc(label)}</option>`;
+
+function renderTx() {
+  $('tx').innerHTML = S.sources.map((s, i) => `<tr data-i="${i}" class="${s.enabled ? '' : 'off'}">
+    <td><input type="checkbox" data-k="enabled" ${s.enabled ? 'checked' : ''}></td><td>${s.id}</td>
+    <td><input class="w-m" data-k="name" value="${esc(s.name)}"></td>
+    <td><select data-k="profile">${opt('aes67', 'AES67', s.profile)}${opt('st2110-30', 'ST 2110-30', s.profile)}</select></td>
+    <td><select data-k="encoding">${opt('L24', 'L24', s.encoding)}${opt('L16', 'L16', s.encoding)}</select></td>
+    <td><select data-k="ptime_us" data-num>${[125, 250, 333, 1000, 4000].map(p => opt(p, p >= 1000 ? p / 1000 + ' ms' : p + ' µs', s.ptime_us)).join('')}</select></td>
+    <td><input class="w-m mono" data-k="address" value="${esc(s.address)}"></td>
+    <td><input class="w-s" type="number" data-k="port" data-num value="${s.port}"></td>
+    <td><input class="w-s" type="number" data-k="ttl" data-num value="${s.ttl}"></td>
+    <td><input class="w-s" type="number" data-k="payload_type" data-num value="${s.payload_type}"></td>
+    <td><input class="w-m mono" data-k="channels" data-list value="${listText(s.channels)}"></td>
+    <td><button data-del>Remove</button></td></tr>`).join('');
+  $('tx-limit').textContent = `${S.sources.length} / ${LIMITS.sources}`;
+  $('add-tx').disabled = S.sources.length >= LIMITS.sources;
+}
+
+function streamOptions(k) {
+  let o = opt('', '— unassigned —', k.sdp ? '__sdp' : k.follow);
+  const names = new Set();
+  for (const x of SAP) {
+    if (names.has(x.name) || !x.stream) continue; names.add(x.name);
+    o += opt(x.name, `${x.name} — ${x.stream.channels}ch ${x.stream.encoding} ${x.stream.rate / 1000}k (${x.origin})${x.local ? ' [this node]' : ''}`, k.sdp ? '__sdp' : k.follow);
+  }
+  if (k.follow && !names.has(k.follow)) o += opt(k.follow, `${k.follow} (not heard now)`, k.follow);
+  o += opt('__sdp', 'Pasted SDP…', k.sdp ? '__sdp' : '');
+  return o;
+}
+function renderRx() {
+  $('rx').innerHTML = S.sinks.map((k, i) => {
+    const showSdp = k.sdp || openSdp.has(i);
+    return `<tr data-i="${i}" class="${k.enabled ? '' : 'off'}">
+    <td><input type="checkbox" data-k="enabled" ${k.enabled ? 'checked' : ''}></td><td>${k.id}</td>
+    <td><input class="w-m" data-k="name" value="${esc(k.name)}"></td>
+    <td><select data-k="stream">${streamOptions(k)}</select></td>
+    <td><input class="w-s" type="number" step="0.5" min="0.5" data-k="delay_ms" data-num value="${k.delay_ms}"></td>
+    <td><input class="w-m mono" data-k="map" data-map value="${listText(k.map)}"></td>
+    <td><button data-del>Remove</button></td></tr>
+    ${showSdp ? `<tr class="detail" data-i="${i}"><td></td><td colspan="6"><label class="f">SDP for ${esc(k.name)}
+      <textarea data-k="sdp" placeholder="v=0&#10;o=- … IN IP4 …&#10;s=…&#10;c=IN IP4 239.x.x.x/32&#10;m=audio 5004 RTP/AVP 97&#10;a=rtpmap:97 L24/48000/8">${esc(k.sdp)}</textarea></label></td></tr>` : ''}`;
+  }).join('');
+  $('rx-limit').textContent = `${S.sinks.length} / ${LIMITS.sinks}`;
+  $('add-rx').disabled = S.sinks.length >= LIMITS.sinks;
+}
+
+function bindTable(tbodyId, list, render) {
+  $(tbodyId).addEventListener('change', ev => {
+    const el = ev.target, row = el.closest('tr'); if (!row || !el.dataset.k) return;
+    const item = S[list][+row.dataset.i], k = el.dataset.k;
+    try {
+      if (el.type === 'checkbox') item[k] = el.checked;
+      else if ('list' in el.dataset) item[k] = parseList(el.value, false);
+      else if ('map' in el.dataset) item[k] = parseList(el.value, true);
+      else if ('num' in el.dataset) item[k] = Number(el.value);
+      else if (k === 'stream') {
+        if (el.value === '__sdp') { item.follow = ''; openSdp.add(+row.dataset.i); }
+        else { item.follow = el.value; item.sdp = ''; openSdp.delete(+row.dataset.i); }
+      }
+      else item[k] = el.value;
+      el.style.outline = '';
+    } catch (e) { el.style.outline = '2px solid var(--bad)'; banner(e.message); return; }
+    if (k === 'enabled' || k === 'stream') render();
+  });
+  $(tbodyId).addEventListener('click', ev => {
+    if (!('del' in ev.target.dataset)) return;
+    S[list].splice(+ev.target.closest('tr').dataset.i, 1); openSdp.clear(); render();
+  });
+}
+
+function fillForm(devices, ifaces) {
+  const g = S;
+  $('node_name').value = g.node_name; $('sample_rate').value = g.sample_rate;
+  $('clock_source').value = g.clock.source; $('ptp_domain').value = g.clock.domain;
+  $('sap_announce').value = String(g.sap.announce); $('sap_listen').value = String(g.sap.listen);
+  $('sap_interval').value = g.sap.interval_s; $('http_port').value = g.http_port;
+  $('capture_channels').value = g.audio.capture_channels; $('playback_channels').value = g.audio.playback_channels;
+  $('period_frames').value = g.audio.period_frames;
+  const ifOpts = opt('', 'Automatic (first physical, up)', g.interface) +
+    ifaces.filter(i => !i.loopback).map(i => opt(i.name, `${i.name} — ${i.ipv4}${i.up ? '' : ' (down)'}`, g.interface)).join('');
+  $('interface').innerHTML = ifOpts + (g.interface && !ifaces.some(i => i.name === g.interface) ? opt(g.interface, g.interface + ' (missing)', g.interface) : '');
+  const devOpts = (list, cur) => opt('', 'System default', cur) +
+    list.map(d => opt(d.name, `${d.name} — ${d.max_channels} ch${d.rates.length ? ', ' + d.rates.map(r => r / 1000 + 'k').join('/') : ''}`, cur)).join('') +
+    (cur && !list.some(d => d.name === cur) ? opt(cur, cur + ' (not found)', cur) : '');
+  $('capture_device').innerHTML = devOpts(devices.capture || [], g.audio.capture_device);
+  $('playback_device').innerHTML = devOpts(devices.playback || [], g.audio.playback_device);
+  renderTx(); renderRx();
+}
+
+function collect() {
+  const s = S;
+  s.node_name = $('node_name').value.trim(); s.interface = $('interface').value;
+  s.sample_rate = +$('sample_rate').value; s.clock.source = $('clock_source').value; s.clock.domain = +$('ptp_domain').value;
+  s.sap.announce = $('sap_announce').value === 'true'; s.sap.listen = $('sap_listen').value === 'true';
+  s.sap.interval_s = +$('sap_interval').value; s.http_port = +$('http_port').value;
+  s.audio.capture_device = $('capture_device').value; s.audio.playback_device = $('playback_device').value;
+  s.audio.capture_channels = +$('capture_channels').value; s.audio.playback_channels = +$('playback_channels').value;
+  s.audio.period_frames = +$('period_frames').value;
+  return s;
+}
+
+async function load() {
+  const [st, dev, ifs, sap] = await Promise.all([
+    api('GET', '/api/settings'), api('GET', '/api/devices').catch(() => ({})),
+    api('GET', '/api/interfaces').catch(() => []), api('GET', '/api/browse').catch(() => []),
+  ]);
+  S = st.settings; LIMITS = st.limits || LIMITS; SAP = sap; openSdp.clear();
+  fillForm(dev, ifs);
+}
+
+$('add-tx').onclick = () => {
+  const id = Math.max(0, ...S.sources.map(x => x.id), ...S.sinks.map(x => x.id)) + 1;
+  S.sources.push({id, enabled: true, name: `TX ${String(S.sources.length + 1).padStart(2, '0')}`, profile: 'aes67',
+    address: `239.69.0.${(id % 250) + 1}`, port: 5004, ttl: 32, dscp: 34, payload_type: 97, encoding: 'L24', ptime_us: 1000, channels: [0, 1]});
+  renderTx();
+};
+$('add-rx').onclick = () => {
+  const id = Math.max(0, ...S.sources.map(x => x.id), ...S.sinks.map(x => x.id)) + 1;
+  S.sinks.push({id, enabled: false, name: `RX ${String(S.sinks.length + 1).padStart(2, '0')}`, sdp: '', follow: '', delay_ms: 10, map: [0, 1]});
+  renderRx();
+};
+$('save').onclick = async () => {
+  $('save').disabled = true;
+  try {
+    const r = await api('PUT', '/api/settings', collect());
+    S = r.settings; openSdp.clear(); renderTx(); renderRx();
+    banner('Saved and applied.', true);
+  } catch (e) { banner(e.message); }
+  $('save').disabled = false;
+};
+$('reload').onclick = () => load().then(() => banner('Reloaded the saved settings.', true));
+bindTable('tx', 'sources', renderTx);
+bindTable('rx', 'sinks', renderRx);
+load().catch(e => banner('Could not load settings: ' + e.message));
+setInterval(async () => { try { SAP = await api('GET', '/api/browse'); } catch (e) {} }, 10000);
+</script>
+</body>
+</html>

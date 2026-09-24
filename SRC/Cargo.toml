@@ -1,0 +1,39 @@
+# apkaudio-aes67 — an AES67 / SMPTE ST 2110-30 transmitter and receiver, bridged
+# to an ALSA sound card, as one plugin container.
+#
+# A REWRITE, NOT A PORT, of the idea in bondagit/aes67-linux-daemon. That
+# daemon drives a RAVENNA kernel module which presents a VIRTUAL sound card and
+# takes its media clock from a kernel PTP slave. None of that fits a plugin
+# container (no kernel modules, read-only root, uid 1000), so this crate turns
+# it inside out: a REAL card is opened through ALSA (cpal), a user-space PTPv2
+# slave keeps a virtual clock, and an adaptive resampler absorbs the difference
+# between the card's crystal and the network's media clock. The web UI and the
+# REST API the original daemon has are here too, on one port (`http_port`).
+#
+# No new third-party dependency: every crate below is already in the discovery
+# workspace's lockfile, so the shared plugin image builds `--locked` unchanged.
+[package]
+name = "apkaudio-aes67"
+version = "0.1.0"
+edition.workspace = true
+workspace = "../../../discovery/SRC"
+description = "AES67 / SMPTE ST 2110-30 transmitter and receiver bridged to an ALSA sound card"
+
+[dependencies]
+# The container entry point in src/bin/apk-aes67.rs.
+apk-plugin-runner = { path = "../../../discovery/SRC/RUNNER" }
+apkaudio-contracts = { path = "../../../BareMetal/SRC/contracts/rust" }
+# ALSA, the same version SOUNDCARD_IN / SOUNDCARD_OUT open their cards with.
+cpal = "0.15"
+# getifaddrs for the interface list, clock_gettime for CLOCK_MONOTONIC_RAW / CLOCK_TAI.
+libc = "0.2"
+rumqttc = "0.24"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# SO_REUSEPORT on 319/320/9875 so this agent shares them with apk-ptp and apk-sap
+# on one host-networked node; SSM joins for `a=source-filter`.
+socket2 = { version = "0.6", features = ["all"] }
+
+[[bin]]
+name = "apk-aes67"
+path = "src/bin/apk-aes67.rs"

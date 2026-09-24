@@ -1,0 +1,55 @@
+# APK:plugin:AES67 — AES67 / SMPTE ST 2110-30 senders and receivers bridged to an ALSA sound card, one container.
+#
+# STARTED BY THE RUNNER WITH THE REST OF THE PLUGINS. discovery/Docker/docker-compose.yml
+# `include:`s this file, and DockTor reads the plugin roles off those files'
+# `profiles:` (_common.sh::plugin_roles_declared), so `sound` and `aes67` are in the
+# default role list and an ordinary mount builds and starts it:
+#     python3 'PODS/K8:runner.py' up
+#     xdg-open http://127.0.0.1:8130/config        # 16 senders × 16 receivers, up to 8 channels each
+# By hand, alone (the same service, no other plugin):
+#     COMPOSE_PROFILES=aes67 docker compose -f 'PODS/POD:THICK/plugin/plugin:AES67/Docker/docker-compose.yml' up -d --build
+# The image, the capability floor, the broker variables and the healthcheck are
+# the base service in discovery/Docker/plugin-base.yml; this file says only
+# what is THIS plugin's.
+
+# ONE PROJECT WITH THE REST (`apk-audio`), so the plugins clump with the node.
+name: apk-audio
+
+services:
+  aes67:
+    extends:
+      file: "../../../discovery/Docker/plugin-base.yml"
+      service: plugin-host
+    container_name: Plugin-AES67
+    command: ["apk-aes67"]
+    # `sound` because it opens the card, like SOUNDCARD_IN/OUT; `aes67` so it
+    # can be raised alone.
+    profiles: [sound, aes67]
+    # PTP's UDP 319/320 are below 1024. The binary carries the matching FILE
+    # capability (discovery/Docker/Dockerfile); without this line it is not in
+    # the bounding set and the daemon falls back to CLOCK_TAI, saying so.
+    cap_add: [NET_BIND_SERVICE]
+    # The card, and only this container's.
+    devices:
+      - /dev/snd:/dev/snd
+    group_add: [audio]
+    environment:
+      APK_AES67_HTTP_PORT: ${APK_AES67_HTTP_PORT:-8130}
+      # Set it and every PUT/POST/DELETE on the API needs `Authorization: Bearer <token>`.
+      APK_AES67_TOKEN: ${APK_AES67_TOKEN:-}
+      APK_AES67_STATE: /var/lib/apkaudio/aes67/settings.json
+    volumes:
+      # THE ONE WRITABLE PLACE: what /config saves. The root is read-only.
+      - type: volume
+        source: aes67-state
+        target: /var/lib/apkaudio/aes67
+
+volumes:
+  # LOGGER STORAGE — owned by DATABSE:volume:Log STORAGE, which is up first.
+  apk-audio-logs:
+    name: apk-audio-logs
+    external: true
+  mac-lookup-cache:
+    name: apk-audio-mac-lookup-cache
+  aes67-state:
+    name: apk-audio-aes67-state

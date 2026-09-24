@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AES67 Status</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>AES67 / ST 2110-30 <small id="node">—</small></h1>
+  <nav><a class="on" href="/status">Status</a><a href="/config">Config</a></nav>
+  <span class="spacer"></span>
+  <span class="chip" id="updated">connecting…</span>
+</header>
+<main>
+  <div class="banner err" id="banner"></div>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">Media clock</div><div class="v" id="t-clock">—</div><div class="s" id="t-clock-s"></div></div>
+    <div class="tile"><div class="k">Offset from master</div><div class="v" id="t-offset">—</div><div class="s" id="t-delay"></div></div>
+    <div class="tile"><div class="k">Sound card</div><div class="v" id="t-audio">—</div><div class="s" id="t-audio-s"></div></div>
+    <div class="tile"><div class="k">Senders</div><div class="v" id="t-tx">—</div><div class="s" id="t-tx-s"></div></div>
+    <div class="tile"><div class="k">Receivers</div><div class="v" id="t-rx">—</div><div class="s" id="t-rx-s"></div></div>
+    <div class="tile"><div class="k">SAP sessions heard</div><div class="v" id="t-sap">—</div><div class="s" id="t-sap-s"></div></div>
+  </div>
+
+  <div class="grid2" style="margin-bottom:16px">
+    <section><h2>PTP / media clock</h2><dl class="kv" id="clock"></dl></section>
+    <section><h2>Sound card (ALSA)</h2><dl class="kv" id="audio"></dl>
+      <div style="margin-top:10px"><span class="muted" style="font-size:12px">Capture input</span><br><span class="meters" id="cap-meters"></span></div>
+    </section>
+  </div>
+
+  <section><h2>Senders <span class="chip" id="tx-count"></span></h2>
+    <div class="scroll"><table>
+      <thead><tr><th>#</th><th>Name</th><th>Profile</th><th>Destination</th><th>Card ch</th><th>State</th>
+        <th class="num">Packets</th><th class="num">Mbit/s</th><th class="num">Late</th><th class="num">Underruns</th>
+        <th class="num">Buffer</th><th class="num">Drift</th><th>Level</th><th>SDP</th></tr></thead>
+      <tbody id="tx"></tbody>
+    </table></div>
+  </section>
+
+  <section><h2>Receivers <span class="chip" id="rx-count"></span></h2>
+    <div class="scroll"><table>
+      <thead><tr><th>#</th><th>Name</th><th>Stream</th><th>From</th><th>Format</th><th>→ Card ch</th><th>State</th>
+        <th class="num">Packets</th><th class="num">Lost</th><th class="num">Late</th><th class="num">Underruns</th>
+        <th class="num">Buffer / target</th><th class="num">Link offset</th><th class="num">Jitter</th><th class="num">Drift</th><th>Level</th></tr></thead>
+      <tbody id="rx"></tbody>
+    </table></div>
+  </section>
+
+  <div class="grid2">
+    <section><h2>Streams on the network (SAP)</h2>
+      <div class="scroll"><table><thead><tr><th>Session</th><th>Origin</th><th>Format</th><th>Group</th><th class="num">Seen</th></tr></thead>
+      <tbody id="sap"></tbody></table></div></section>
+    <section><h2>Events</h2><ul class="log" id="events"></ul></section>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = (n, d = 0) => n == null || isNaN(n) ? '—' : Number(n).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+const dot = cls => `<span class="dot ${cls}"></span>`;
+const chRange = list => {
+  if (!list || !list.length) return '—';
+  const ones = list.map(c => c == null ? null : c + 1);
+  const contiguous = ones.every((c, i) => c != null && (i === 0 || c === ones[i - 1] + 1));
+  return contiguous && ones.length > 1 ? `${ones[0]}–${ones[ones.length - 1]}` : ones.map(c => c ?? '·').join(',');
+};
+function meters(dbfs) {
+  return (dbfs || []).map(db => {
+    const pct = Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+    const cls = db > -1 ? 'clip' : db > -9 ? 'hot' : '';
+    return `<i title="${db.toFixed(1)} dBFS"><b class="${cls}" style="height:${pct}%"></b></i>`;
+  }).join('');
+}
+const kv = rows => rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('');
+const us = ns => ns == null ? '—' : Math.abs(ns) >= 1e6 ? fmt(ns / 1e6, 2) + ' ms' : fmt(ns / 1e3, 1) + ' µs';
+let lastBytes = {}, lastT = 0;
+
+function renderClock(c) {
+  const good = c.locked, cls = good ? 'ok' : c.state === 'faulty' ? 'bad' : 'warn';
+  $('t-clock').innerHTML = `${dot(cls)}${esc(c.state)}`;
+  $('t-clock-s').textContent = c.source === 'system' ? 'CLOCK_TAI (host ptp4l/phc2sys)' : `domain ${c.domain} · ${c.interface || '—'}`;
+  $('t-offset').textContent = c.source === 'system' ? 'n/a' : us(c.offset_ns);
+  $('t-delay').textContent = c.mean_path_delay_ns != null ? 'path delay ' + us(c.mean_path_delay_ns) : '';
+  const gm = c.grandmaster;
+  $('clock').innerHTML = kv([
+    ['State', `${dot(cls)}${esc(c.state)}${c.error ? ` <span class="bad">${esc(c.error)}</span>` : ''}`],
+    ['Source', esc(c.source)], ['Domain', c.domain], ['Interface', esc(c.interface || '—')],
+    ['Grandmaster', gm ? `<span class="mono">${esc(gm.grandmaster)}</span>` : '—'],
+    ['GM quality', gm ? `class ${gm.clock_class} · accuracy 0x${gm.clock_accuracy.toString(16)} · prio ${gm.priority1}/${gm.priority2} · ${gm.steps_removed} step(s)` : '—'],
+    ['Master port', c.master_port ? `<span class="mono">${esc(c.master_port)}</span>` : '—'],
+    ['This port', `<span class="mono">${esc(c.my_port)}</span>`],
+    ['Offset / path delay', `${us(c.offset_ns)} / ${us(c.mean_path_delay_ns)}`],
+    ['Frequency', fmt(c.freq_ppm, 3) + ' ppm'],
+    ['Sync interval', c.sync_interval_log != null ? `2^${c.sync_interval_log} s` : '—'],
+    ['Masters heard', c.masters_seen],
+    ['Messages', `sync ${fmt(c.counts.sync)} · follow-up ${fmt(c.counts.follow_up)} · announce ${fmt(c.counts.announce)} · delay ${fmt(c.counts.delay_req)}/${fmt(c.counts.delay_resp)}`],
+    ['Servo', `${fmt(c.servo_updates)} updates, ${fmt(c.servo_steps)} steps`],
+  ]);
+}
+
+function side(s) {
+  if (!s) return '—';
+  if (s.error) return `${dot('bad')}<span class="bad">${esc(s.requested)}: ${esc(s.error)}</span>`;
+  return `${dot(s.open ? 'ok' : 'warn')}${esc(s.device || s.requested)} · ${fmt(s.rate)} Hz × ${s.channels} ch · ${esc(s.format)}`;
+}
+
+function renderAudio(a, rate) {
+  if (!a) { $('t-audio').textContent = '—'; return; }
+  const open = (a.capture.open ? 1 : 0) + (a.playback.open ? 1 : 0);
+  $('t-audio').innerHTML = `${dot(open === 2 ? 'ok' : open ? 'warn' : 'bad')}${open === 2 ? 'in + out' : a.capture.open ? 'in only' : a.playback.open ? 'out only' : 'closed'}`;
+  $('t-audio-s').textContent = `${a.capture.channels} in / ${a.playback.channels} out @ ${fmt(a.capture.rate || a.playback.rate)} Hz`;
+  const resamp = [a.capture, a.playback].some(s => s.open && s.rate !== rate);
+  $('audio').innerHTML = kv([
+    ['Capture', side(a.capture)], ['Playback', side(a.playback)],
+    ['Stream rate', `${fmt(rate)} Hz${resamp ? ' <span class="warn">(card differs — resampling)</span>' : ''}`],
+    ['Callbacks', `${fmt(a.capture_callbacks)} in · ${fmt(a.playback_callbacks)} out`],
+    ['Stream errors', a.stream_errors ? `<span class="bad">${fmt(a.stream_errors)} — ${esc(a.last_error)}</span>` : '0'],
+  ]);
+  $('cap-meters').innerHTML = meters(a.capture_dbfs);
+}
+
+function renderTx(list, dt) {
+  let on = 0, pk = 0;
+  $('tx').innerHTML = list.map(({config: c, live: l}) => {
+    const run = !!l; if (run) on++;
+    const mbit = run && dt > 0 && lastBytes['tx' + c.id] != null ? (l.bytes - lastBytes['tx' + c.id]) * 8 / dt / 1e6 : null;
+    if (run) { lastBytes['tx' + c.id] = l.bytes; pk += l.packets; }
+    const state = !c.enabled ? `${dot('')}off` : !run ? `${dot('warn')}starting` : l.error ? `${dot('bad')}<span class="bad">${esc(l.error)}</span>` : `${dot('ok')}sending`;
+    const lvl = l?.conformance_level ? ` <span class="chip">2110 ${l.conformance_level}</span>` : '';
+    return `<tr class="${c.enabled ? '' : 'off'}"><td>${c.id}</td><td>${esc(c.name)}</td>
+      <td>${esc(c.profile)}${c.profile === 'st2110-30' ? lvl : ''}<br><span class="muted">${c.encoding} · ${c.ptime_us} µs</span></td>
+      <td class="mono">${esc(c.address)}:${c.port}</td><td>${chRange(c.channels)}</td><td>${state}</td>
+      <td class="num">${run ? fmt(l.packets) : '—'}</td><td class="num">${mbit == null ? '—' : fmt(mbit, 2)}</td>
+      <td class="num ${run && l.late ? 'warn' : ''}">${run ? fmt(l.late) : '—'}</td>
+      <td class="num ${run && l.underruns ? 'warn' : ''}">${run ? fmt(l.underruns) : '—'}</td>
+      <td class="num">${run ? fmt(l.buffer_ms, 1) + ' ms' : '—'}</td><td class="num">${run ? fmt(l.trim_ppm, 1) + ' ppm' : '—'}</td>
+      <td><span class="meters">${run ? meters(l.level_dbfs) : ''}</span></td>
+      <td>${run ? `<a href="/api/sources/${c.id}/sdp" target="_blank">sdp</a>` : ''}</td></tr>`;
+  }).join('');
+  $('t-tx').textContent = `${on} / ${list.length}`;
+  $('t-tx-s').textContent = `${fmt(pk)} packets sent`;
+  $('tx-count').textContent = `${on} running`;
+}
+
+function renderRx(list) {
+  let recv = 0, en = 0;
+  $('rx').innerHTML = list.map(({config: c, live: l, error}) => {
+    if (c.enabled) en++;
+    if (l && l.state === 'receiving') recv++;
+    const st = l?.stream;
+    const state = !c.enabled ? `${dot('')}off` : error ? `${dot('warn')}<span class="warn">${esc(error)}</span>`
+      : !l ? `${dot('warn')}starting` : l.error ? `${dot('bad')}<span class="bad">${esc(l.error)}</span>`
+      : l.state === 'receiving' ? `${dot('ok')}receiving` : `${dot('warn')}waiting`;
+    const src = c.sdp ? (st ? esc(st.name) : 'SDP') : c.follow ? `↻ ${esc(c.follow)}` : '<span class="muted">unassigned</span>';
+    return `<tr class="${c.enabled ? '' : 'off'}"><td>${c.id}</td><td>${esc(c.name)}</td><td>${src}</td>
+      <td class="mono">${l?.sender ? esc(l.sender) : st ? esc(st.address) + ':' + st.port : '—'}</td>
+      <td>${st ? `${st.encoding} ${st.channels}ch ${fmt(st.rate / 1000, 1)}k ${st.ptime_us}µs<br><span class="muted">${esc(st.profile)}</span>` : '—'}</td>
+      <td>${chRange(c.map)}</td><td>${state}</td>
+      <td class="num">${l ? fmt(l.packets) : '—'}</td>
+      <td class="num ${l?.lost ? 'bad' : ''}">${l ? fmt(l.lost) : '—'}</td>
+      <td class="num ${l?.out_of_order ? 'warn' : ''}">${l ? fmt(l.out_of_order) : '—'}</td>
+      <td class="num ${l?.underruns ? 'warn' : ''}">${l ? fmt(l.underruns) : '—'}</td>
+      <td class="num">${l ? `${fmt(l.buffer_ms, 1)} / ${fmt(l.target_ms, 1)} ms` : '—'}</td>
+      <td class="num">${l?.link_offset_ms != null ? fmt(l.link_offset_ms, 2) + ' ms' : '—'}</td>
+      <td class="num">${l ? fmt(l.jitter_ms, 3) + ' ms' : '—'}</td>
+      <td class="num">${l ? fmt(l.trim_ppm, 1) + ' ppm' : '—'}</td>
+      <td><span class="meters">${l ? meters(l.level_dbfs) : ''}</span></td></tr>`;
+  }).join('');
+  $('t-rx').textContent = `${recv} / ${en}`;
+  $('t-rx-s').textContent = `${en} enabled of ${list.length}`;
+  $('rx-count').textContent = `${recv} receiving`;
+}
+
+async function tick() {
+  try {
+    const r = await fetch('/api/status');
+    const s = await r.json();
+    const now = performance.now() / 1000, dt = lastT ? now - lastT : 0; lastT = now;
+    $('node').textContent = `${s.node.name} · ${s.node.interface ? s.node.interface.name + ' ' + s.node.interface.ipv4 : 'no interface'}`;
+    $('banner').className = 'banner err' + (s.node.load_error ? ' show' : '');
+    $('banner').textContent = s.node.load_error ? 'Saved settings were refused; running on defaults: ' + s.node.load_error : '';
+    renderClock(s.clock);
+    renderAudio(s.audio, s.node.sample_rate);
+    renderTx(s.sources, dt);
+    renderRx(s.sinks);
+    $('t-sap').textContent = s.sap.sessions;
+    $('t-sap-s').textContent = `${s.sap.listening ? 'listening' : 'not listening'} · announce ${s.sap.announce ? 'on' : 'off'}`;
+    $('events').innerHTML = s.events.map(e => `<li><time>${new Date(e.t * 1000).toLocaleTimeString()}</time>${esc(e.text)}</li>`).join('');
+    $('updated').textContent = 'live · up ' + Math.floor(s.node.uptime_s / 60) + ' min';
+  } catch (e) {
+    $('updated').textContent = 'disconnected';
+  }
+}
+async function sap() {
+  try {
+    const list = await (await fetch('/api/browse')).json();
+    $('sap').innerHTML = list.length ? list.map(x => `<tr><td>${esc(x.name)}${x.local ? ' <span class="chip">this node</span>' : ''}</td>
+      <td class="mono">${esc(x.origin)}</td>
+      <td>${x.stream ? `${x.stream.encoding} ${x.stream.channels}ch ${fmt(x.stream.rate / 1000, 1)}k · ${esc(x.stream.profile)}` : `<span class="bad">${esc(x.error)}</span>`}</td>
+      <td class="mono">${x.stream ? esc(x.stream.address) + ':' + x.stream.port : ''}</td><td class="num">${x.last_seen_s}s</td></tr>`).join('')
+      : '<tr><td colspan="5" class="muted">No SAP announcements heard yet.</td></tr>';
+  } catch (e) {}
+}
+tick(); sap();
+setInterval(tick, 1000); setInterval(sap, 5000);
+</script>
+</body>
+</html>
