@@ -39,6 +39,54 @@ The built-in slave uses E2E delay request/response, handles one-step and two-ste
 
 If 319/320 will not bind because the capability is missing, the clock state reads `faulty` with the reason, and the daemon runs on `CLOCK_TAI`.
 
+## Seeing the network in your desktop's sound settings: `snd-aloop`
+
+The original daemon's kernel module **creates** a sound card. This plugin can't load drivers from inside its container, so it **opens** an existing card and connects that card's jacks to the network. With a physical card, the network comes out of the speakers and goes in through the mic. It doesn't show up as a device in your system sound settings.
+
+The kernel's own virtual loopback driver, **`snd-aloop`**, provides that device. It creates a card with two linked sides: what is played into one side can be recorded from the other.
+
+```
+   your apps (PipeWire)                        Plugin-AES67
+ ┌─────────────────────┐                  ┌──────────────────────┐
+ │ hw:CARD=AES67,DEV=0 │ ── play ──────▶  │ hw:CARD=AES67,DEV=1  │ ─▶ Senders  ─▶ network
+ │  "Loopback Analog   │ ◀── record ────  │ (capture + playback) │ ◀─ Receivers ◀─ network
+ │   Stereo" device    │                  │                      │
+ └─────────────────────┘                  └──────────────────────┘
+```
+
+The two sides are symmetric. PipeWire takes **DEV=0** as soon as the card appears, so the plugin uses **DEV=1**, the side that's left.
+
+**It is loaded for you at launch.** The compose file runs a one-shot container, `Plugin-AES67-Loopback` (`Docker/Dockerfile.loopback`, `SRC/loopback/aes67-loopback.sh`), **before** the plugin:
+
+- if a card with id `AES67` already exists, it does nothing;
+- if `snd-aloop` is already loaded under another id, it leaves it alone and says which id to pick;
+- otherwise it runs `modprobe snd-aloop id=AES67 pcm_substreams=1`, using the **host's** `/lib/modules` mounted read-only, so the module always matches the running kernel.
+
+It is the only container here with a kernel capability. It has `SYS_MODULE` and nothing else: no network, a read-only root, and it exits within a second. **It never blocks the launch.** If the host refuses the module, the plugin still starts on your physical card, and the container's log prints the commands to run by hand:
+
+```sh
+docker logs Plugin-AES67-Loopback
+# by hand, once:
+sudo modprobe snd-aloop id=AES67 pcm_substreams=1
+# and across reboots:
+echo snd-aloop | sudo tee /etc/modules-load.d/aes67.conf
+echo 'options snd-aloop id=AES67 pcm_substreams=1' | sudo tee /etc/modprobe.d/aes67.conf
+```
+
+`Plugin-AES67` waits for this container to finish (`depends_on: service_completed_successfully`). This ordering matters because Docker resolves `devices: /dev/snd` when a container is **created**, so a card that appears later isn't visible inside it. If you load the module by hand while the plugin is running, recreate the container: `up -d --force-recreate aes67`. A plain restart isn't enough.
+
+**Using it:** on `/config`, set both **Input device** and **Output device** to **"Loopback PCM — Loopback"**, i.e. `hw:CARD=AES67,DEV=1`, the side PipeWire left free. It is the only loopback device the list offers. PipeWire shows the other side as **"Loopback Analog Stereo"**, as both an output and an input. Your apps play into it, and the audio leaves on the senders. What the receivers play comes back into your apps from it. Route the channels on the **MATRIX** tab.
+
+**Limits, stated plainly:**
+- A loopback substream carries at most **32 channels**, so at most 4 of the 16 eight-channel streams can pass through it in each direction. For all 128 channels, use a real multichannel card.
+- Both sides of a loopback must agree on rate, format and channel count, and **whichever side opens first sets them.** PipeWire's default profile opens it as stereo. For more than 2 channels, switch the Loopback card to the **Pro Audio** profile (`pavucontrol` → Configuration), and give **Input/Output channels to open** the same count on `/config`.
+
+| Variable | Default | |
+|---|---|---|
+| `APK_AES67_LOOPBACK` | `on` | `off` skips the launcher |
+| `APK_AES67_LOOPBACK_ID` | `AES67` | the card id, i.e. `hw:CARD=<id>` |
+| `APK_AES67_LOOPBACK_SUBSTREAMS` | `1` | substreams per side (one per program that opens it) |
+
 ## Sound card latency
 
 Each buffer grows automatically to at least 1.5 × the largest burst the card has delivered. On a desktop, ALSA's `default` device goes through PipeWire, which delivers 2048-frame (43 ms) bursts, and buffers settle around 65 ms. For low latency, pick the card's `hw:` device on `/config` and set **ALSA period** to 64–256 frames.
@@ -49,7 +97,8 @@ Each buffer grows automatically to at least 1.5 × the largest burst the card ha
 |---|---|
 | `config`, `status`, `incoming/api`, `incoming/telemetry`, self test | from `apk-plugin-runner`, as for every plugin |
 | `Agent/state`, `detail`, `interface` | retained: `listening`, or `partial` with a list of what is missing |
-| `Clock`, `Audio`, `Stream/Source/<id>`, `Stream/Sink/<id>` | QoS 0, not retained, restated every 5 s |
+| `Clock`, `Audio` | QoS 0, not retained, restated every 5 s |
+| `Stream/Source/<id>`, `Stream/Sink/<id>` | **retained, published only when they change**: configuration and state (`sending` / `receiving` / `waiting` / `disabled`, error, SDP, sender), **no counters or levels**. A removed stream is cleared. The live numbers are on `/status` and `GET /api/status` |
 | `outgoing/command` → `CommandResult` | `{"op":"enable","kind":"source","id":1}`, `{"op":"apply","settings":{…}}`, `{"op":"reload"}` |
 
 ## Why this plugin has its own port

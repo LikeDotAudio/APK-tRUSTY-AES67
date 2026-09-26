@@ -50,6 +50,11 @@ pub struct Transmitter {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
+/// `channels` as routes: 65535 (or any channel the card lacks) reads silence.
+fn route_of(channels: &[u16]) -> crate::audio::Routes {
+    crate::audio::Routes::new(channels.iter().map(|c| (*c != u16::MAX).then_some(*c as usize)))
+}
+
 pub fn random_u32() -> u32 {
     std::collections::hash_map::RandomState::new().build_hasher().finish() as u32
 }
@@ -100,7 +105,7 @@ impl Transmitter {
         let card_rate = if card_rate == 0 { rate } else { card_rate };
         let cushion = (card_rate as f64 * CAPTURE_CUSHION_S) as usize;
         let tap = Arc::new(Tap {
-            channels: cfg.channels.iter().map(|c| *c as usize).collect(),
+            channels: route_of(&cfg.channels),
             ring: Ring::new(cushion * 4 + 16384, ch),
             burst: std::sync::atomic::AtomicUsize::new(0),
         });
@@ -253,6 +258,21 @@ impl Transmitter {
             level_dbfs: self.meter.take_dbfs(),
             conformance_level: sdp::conformance_level(rate, self.cfg.ptime_us, self.cfg.channels.len() as u16),
         }
+    }
+}
+
+impl Transmitter {
+    /// Move this sender's card channels while it runs — the MATRIX page's
+    /// crosspoint. No restart, so no new SSRC and no new SDP version for the
+    /// receivers following it. `false` when the channel COUNT differs, which
+    /// is a different stream and has to be restarted.
+    pub fn reroute(&mut self, cfg: &Source) -> bool {
+        if cfg.channels.len() != self.tap.channels.len() {
+            return false;
+        }
+        self.tap.channels.set(cfg.channels.iter().map(|c| (*c != u16::MAX).then_some(*c as usize)));
+        self.cfg.channels = cfg.channels.clone();
+        true
     }
 }
 

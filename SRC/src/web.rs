@@ -1,6 +1,6 @@
 // Part of the APK.audio project — http://APK.audio — made by Anthony Kuzub
 // MIT Licence. Free, for everyone, for ever. Full text in LICENSE at the root.
-//! The web door: `/status`, `/config`, and the REST API both pages use.
+//! The web door: `/status`, `/config`, `/matrix`, and the REST API they use.
 //!
 //! A PORT OF ITS OWN, AND WHY THIS PLUGIN IS THE EXCEPTION. Plugins describe
 //! themselves read-only over the bus (`incoming/api`) behind the node's one
@@ -21,7 +21,11 @@
 //!   GET    /api/devices               ALSA capture / playback devices
 //!   GET    /api/interfaces            IPv4 interfaces
 //!   GET    /api/browse                SAP sessions heard on the network
-//!   GET    /api/sources/{id}/sdp      a running source's SDP (application/sdp)
+//!   GET    /api/sources/{id}/sdp      a source's SDP (application/sdp): the running
+//!                                     one, else what its saved settings would send
+//!   POST   /api/sources/sdp           {source JSON} -> {sdp, live, sap, ravenna,
+//!                                     rtsp_url}: the SDP of the form's row as it
+//!                                     stands, saved or not (read-only; no token)
 //!   PUT    /api/sources/{id}          replace one source   (same for /api/sinks/{id})
 //!   POST   /api/sources               add one              (id assigned if 0)
 //!   DELETE /api/sources/{id}          remove one
@@ -36,6 +40,7 @@ use std::time::Duration;
 
 const STATUS_HTML: &str = include_str!("web/status.html");
 const CONFIG_HTML: &str = include_str!("web/config.html");
+const MATRIX_HTML: &str = include_str!("web/matrix.html");
 const STYLE_CSS: &str = include_str!("web/style.css");
 const MAX_BODY: usize = 1 << 20;
 
@@ -175,13 +180,19 @@ fn route(req: &Request) -> (u16, &'static str, Vec<u8>) {
     if method == "OPTIONS" {
         return (200, "text/plain", Vec::new());
     }
+    // A preview reads; it changes nothing, so it needs no token.
+    if method == "POST" && parts.as_slice() == ["api", "sources", "sdp"] {
+        return preview(&d, &req.body);
+    }
     if matches!(method, "PUT" | "POST" | "DELETE") && !authorised(req) {
         return err(401, "this API needs APK_AES67_TOKEN — send it as `Authorization: Bearer …`");
     }
     match (method, parts.as_slice()) {
         ("GET", []) => (302, "text/plain", Vec::new()),
         ("GET", ["status"]) => (200, "text/html; charset=utf-8", STATUS_HTML.as_bytes().to_vec()),
-        ("GET", ["config"]) => (200, "text/html; charset=utf-8", CONFIG_HTML.as_bytes().to_vec()),
+        // One page, three tabs; the path picks the tab.
+        ("GET", ["config" | "senders" | "receivers"]) => (200, "text/html; charset=utf-8", CONFIG_HTML.as_bytes().to_vec()),
+        ("GET", ["matrix"]) => (200, "text/html; charset=utf-8", MATRIX_HTML.as_bytes().to_vec()),
         ("GET", ["style.css"]) => (200, "text/css; charset=utf-8", STYLE_CSS.as_bytes().to_vec()),
         ("GET", ["api", "status"]) => ok(d.status()),
         ("GET", ["api", "settings"]) => ok(json!({
@@ -207,6 +218,38 @@ fn route(req: &Request) -> (u16, &'static str, Vec<u8>) {
         },
         (_, ["api", kind @ ("sources" | "sinks"), rest @ ..]) => item(&d, method, kind, rest, &req.body),
         _ => err(404, format!("no route for {method} {}", req.path)),
+    }
+}
+
+/// The SDP button on /config: the row as the form holds it right now.
+fn preview(d: &daemon::Daemon, body: &[u8]) -> (u16, &'static str, Vec<u8>) {
+    // Either a bare source, or {"source": …, "settings": …} so the preview
+    // also reflects unsaved node settings (sample rate, node name).
+    let v: Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(e) => return err(400, format!("JSON: {e}")),
+    };
+    let (src_v, pending) = match v.get("source") {
+        Some(src) => (src.clone(), v.get("settings").and_then(|x| serde_json::from_value::<Settings>(x.clone()).ok())),
+        None => (v, None),
+    };
+    let src: Source = match serde_json::from_value(src_v) {
+        Ok(x) => x,
+        Err(e) => return err(400, format!("source JSON: {e}")),
+    };
+    let s = pending.clone().unwrap_or_else(|| d.settings());
+    match d.preview_sdp_with(&src, pending.as_ref()) {
+        Ok((sdp, live)) => {
+            let name = crate::ravenna::Session::from_sdp(src.id, &sdp).map(|x| x.name).unwrap_or_default();
+            ok(json!({
+                "sdp": sdp,
+                "live": live,
+                "sap": { "wanted": src.sap, "node_announces": s.sap.announce, "group": s.sap.group, "port": s.sap.port },
+                "ravenna": { "wanted": src.ravenna, "advertised": crate::ravenna::is_advertised(&name) },
+                "rtsp_url": d.rtsp_url(&src),
+            }))
+        }
+        Err(e) => err(400, e),
     }
 }
 

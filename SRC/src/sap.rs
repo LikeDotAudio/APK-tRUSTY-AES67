@@ -18,9 +18,10 @@ pub const GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 255);
 pub const PORT: u16 = 9875;
 const MIME: &[u8] = b"application/sdp\0";
 
-/// Silence this long and a remote session is forgotten (RFC 2974 §4 suggests
-/// ten announce intervals or an hour; senders here announce every 30 s).
-const FORGET_AFTER: Duration = Duration::from_secs(300);
+/// Silence this long and a remote session is forgotten, until the settings
+/// say otherwise (`sap.timeout_s`). RFC 2974 §4 suggests ten announce
+/// intervals or an hour; senders here announce every 30 s.
+const FORGET_AFTER_S: u64 = 300;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Packet {
@@ -101,12 +102,25 @@ struct Seen {
 #[derive(Default)]
 pub struct Browser {
     sessions: Mutex<HashMap<(Ipv4Addr, u16), Seen>>,
+    /// `sap.timeout_s`; 0 until set means the default.
+    forget_after_s: std::sync::atomic::AtomicU64,
     /// Listener threads running — a count, because a re-tune starts the new
     /// one before the old one has noticed its stop flag.
     pub listening: AtomicUsize,
 }
 
 impl Browser {
+    pub fn set_timeout(&self, secs: u32) {
+        self.forget_after_s.store(secs as u64, Ordering::Relaxed);
+    }
+
+    fn forget_after(&self) -> Duration {
+        match self.forget_after_s.load(Ordering::Relaxed) {
+            0 => Duration::from_secs(FORGET_AFTER_S),
+            s => Duration::from_secs(s),
+        }
+    }
+
     pub fn hear(&self, p: Packet) {
         let mut map = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         if p.deletion {
@@ -128,7 +142,8 @@ impl Browser {
 
     pub fn list(&self, local_ips: &[Ipv4Addr]) -> Vec<Remote> {
         let mut map = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
-        map.retain(|_, s| s.at.elapsed() < FORGET_AFTER);
+        let forget = self.forget_after();
+        map.retain(|_, s| s.at.elapsed() < forget);
         let mut out: Vec<Remote> = map
             .values()
             .map(|s| Remote {
@@ -147,15 +162,15 @@ impl Browser {
     pub fn find(&self, name: &str) -> Option<String> {
         let map = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         map.values()
-            .filter(|s| s.name == name && s.at.elapsed() < FORGET_AFTER)
+            .filter(|s| s.name == name && s.at.elapsed() < self.forget_after())
             .max_by_key(|s| std::cmp::Reverse(s.at.elapsed()))
             .map(|s| s.sdp.clone())
     }
 }
 
 /// Listen until `stop`. Returns the bind error, if there was one.
-pub fn listen(browser: Arc<Browser>, iface: Ipv4Addr, stop: Arc<AtomicBool>) -> std::io::Result<()> {
-    let socket = crate::net::multicast_listener(GROUP, PORT, iface, None)?;
+pub fn listen(browser: Arc<Browser>, iface: Ipv4Addr, group: Ipv4Addr, port: u16, stop: Arc<AtomicBool>) -> std::io::Result<()> {
+    let socket = crate::net::multicast_listener(group, port, iface, None)?;
     browser.listening.fetch_add(1, Ordering::Relaxed);
     let mut buf = vec![0u8; 65536];
     while !stop.load(Ordering::Relaxed) {
@@ -177,8 +192,7 @@ pub fn listen(browser: Arc<Browser>, iface: Ipv4Addr, stop: Arc<AtomicBool>) -> 
 }
 
 /// Send one announcement (or deletion) for each SDP.
-pub fn announce(socket: &UdpSocket, origin: Ipv4Addr, sdps: &[String], deletion: bool) {
-    let to = SocketAddrV4::new(GROUP, PORT);
+pub fn announce(socket: &UdpSocket, origin: Ipv4Addr, to: SocketAddrV4, sdps: &[String], deletion: bool) {
     for sdp in sdps {
         let packet = encode(&Packet { deletion, msg_id_hash: msg_id_hash(sdp), origin, sdp: sdp.clone() });
         if let Err(e) = socket.send_to(&packet, to) {

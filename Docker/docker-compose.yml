@@ -16,12 +16,44 @@
 name: apk-audio
 
 services:
+  # ONE-SHOT, BEFORE THE PLUGIN: loads the host's snd-aloop so the network is
+  # a sound card in the desktop (SRC/loopback/aes67-loopback.sh). The only
+  # container here with a kernel capability, and it has nothing else: no
+  # network, read-only root, the host's modules read-only, gone in a second.
+  # It always exits 0, so a host that refuses the module still gets the plugin.
+  aes67-loopback:
+    build:
+      context: "../../../../.."
+      dockerfile: "PODS/POD:THICK/plugin/plugin:AES67/Docker/Dockerfile.loopback"
+    image: apk-aes67-loopback:local
+    container_name: Plugin-AES67-Loopback
+    profiles: [sound, aes67]
+    restart: "no"
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp
+    user: root
+    cap_drop: [ALL]
+    cap_add: [SYS_MODULE]
+    environment:
+      APK_AES67_LOOPBACK: ${APK_AES67_LOOPBACK:-on}
+      APK_AES67_LOOPBACK_ID: ${APK_AES67_LOOPBACK_ID:-AES67}
+      APK_AES67_LOOPBACK_SUBSTREAMS: ${APK_AES67_LOOPBACK_SUBSTREAMS:-1}
+    volumes:
+      - /lib/modules:/lib/modules:ro
+
   aes67:
     extends:
       file: "../../../discovery/Docker/plugin-base.yml"
       service: plugin-host
     container_name: Plugin-AES67
     command: ["apk-aes67"]
+    # AFTER the loopback card exists: `devices: /dev/snd` is resolved when the
+    # container is CREATED, so a card that appears later is not in it.
+    depends_on:
+      aes67-loopback:
+        condition: service_completed_successfully
     # `sound` because it opens the card, like SOUNDCARD_IN/OUT; `aes67` so it
     # can be raised alone.
     profiles: [sound, aes67]

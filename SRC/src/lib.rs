@@ -21,6 +21,7 @@ pub mod config;
 pub mod daemon;
 pub mod net;
 pub mod ring;
+pub mod ravenna;
 pub mod rtp;
 pub mod rx;
 pub mod sap;

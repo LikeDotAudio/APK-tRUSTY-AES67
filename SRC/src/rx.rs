@@ -76,7 +76,7 @@ impl Receiver {
         let mut map: Vec<Option<usize>> = cfg.map.iter().map(|m| m.map(|c| c as usize)).collect();
         map.resize(ch, None);
         let feed = Arc::new(Feed {
-            map,
+            map: crate::audio::Routes::new(map),
             ring: Arc::clone(&ring),
             reader: Mutex::new(DriftReader::new(ch, rate, card_rate, target)),
             target_frames: std::sync::atomic::AtomicUsize::new(target),
@@ -277,6 +277,16 @@ impl Receiver {
             jitter_ms: s.jitter_x16.load(Ordering::Relaxed) as f64 / 16.0 * 1000.0 / rate,
             level_dbfs: self.feed.meter.take_dbfs(),
         }
+    }
+}
+
+impl Receiver {
+    /// Move this receiver's playback channels while it plays — the MATRIX
+    /// page's crosspoint. Entries past the stream's channel count are ignored.
+    pub fn reroute(&mut self, cfg: &Sink) {
+        let n = self.feed.map.len();
+        self.feed.map.set((0..n).map(|i| cfg.map.get(i).copied().flatten().map(|c| c as usize)));
+        self.cfg.map = cfg.map.clone();
     }
 }
 

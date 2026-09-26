@@ -9,7 +9,7 @@
 <body>
 <header>
   <h1>AES67 / ST 2110-30 <small id="node">—</small></h1>
-  <nav><a class="on" href="/status">Status</a><a href="/config">Config</a></nav>
+  <nav><a class="on" href="/status">Status</a><a href="/matrix">MATRIX</a><a href="/config">Config</a><a href="/senders">Senders</a><a href="/receivers">Receivers</a></nav>
   <span class="spacer"></span>
   <span class="chip" id="updated">connecting…</span>
 </header>
@@ -64,7 +64,7 @@ const fmt = (n, d = 0) => n == null || isNaN(n) ? '—' : Number(n).toLocaleStri
 const dot = cls => `<span class="dot ${cls}"></span>`;
 const chRange = list => {
   if (!list || !list.length) return '—';
-  const ones = list.map(c => c == null ? null : c + 1);
+  const ones = list.map(c => c == null || c >= 65535 ? null : c + 1);
   const contiguous = ones.every((c, i) => c != null && (i === 0 || c === ones[i - 1] + 1));
   return contiguous && ones.length > 1 ? `${ones[0]}–${ones[ones.length - 1]}` : ones.map(c => c ?? '·').join(',');
 };

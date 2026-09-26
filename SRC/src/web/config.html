@@ -5,11 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AES67 Config</title>
 <link rel="stylesheet" href="/style.css">
+<style>
+  .tab { display: none; } .tab.on { display: block; }
+  td.c { text-align: center; }
+  label.chk { display: flex; align-items: center; gap: 8px; }
+  dialog#sdp-dlg { width: min(760px, calc(100vw - 32px)); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  dialog#sdp-dlg::backdrop { background: rgba(0,0,0,.5); }
+  dialog#sdp-dlg h3 { margin: 0 0 6px; font-size: 15px; }
+  dialog#sdp-dlg pre { background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow: auto; max-height: 50vh; font: 12px/1.5 var(--mono); white-space: pre; }
+  .sdp-meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+  .sdp-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--chip); }
+  .pill.live { color: var(--ok); } .pill.preview { color: var(--warn); }
+</style>
 </head>
 <body>
 <header>
   <h1>AES67 / ST 2110-30 <small id="node">configuration</small></h1>
-  <nav><a href="/status">Status</a><a class="on" href="/config">Config</a></nav>
+  <nav><a href="/status">Status</a><a href="/matrix">MATRIX</a><a data-tab="config" href="/config">Config</a><a data-tab="senders" href="/senders">Senders</a><a data-tab="receivers" href="/receivers">Receivers</a></nav>
   <span class="spacer"></span>
   <button id="reload">Discard changes</button>
   <button class="primary" id="save">Save &amp; apply</button>
@@ -17,6 +30,7 @@
 <main>
   <div class="banner" id="banner"></div>
 
+  <div class="tab" id="tab-config">
   <section><h2>Node &amp; network</h2>
     <div class="form">
       <label class="f">Node name (SDP / SAP prefix)<input id="node_name" placeholder="host name"></label>
@@ -27,33 +41,75 @@
       <label class="f">Clock<select id="clock_source">
         <option value="ptp">PTPv2 slave (built in)</option><option value="system">System CLOCK_TAI (host ptp4l)</option></select></label>
       <label class="f">PTP domain<input id="ptp_domain" type="number" min="0" max="127"></label>
-      <label class="f">SAP announce our senders<select id="sap_announce"><option value="true">on</option><option value="false">off</option></select></label>
-      <label class="f">SAP browse the network<select id="sap_listen"><option value="true">on</option><option value="false">off</option></select></label>
-      <label class="f">SAP interval (s)<input id="sap_interval" type="number" min="5" max="300"></label>
       <label class="f">Web port (restart to move)<input id="http_port" type="number" min="1" max="65535"></label>
     </div>
   </section>
 
   <section><h2>Sound card (ALSA)</h2>
-    <div class="form">
-      <label class="f">Capture device (feeds senders)<select id="capture_device"></select></label>
-      <label class="f">Capture channels (0 = device default)<input id="capture_channels" type="number" min="0" max="256"></label>
-      <label class="f">Playback device (fed by receivers)<select id="playback_device"></select></label>
-      <label class="f">Playback channels (0 = device default)<input id="playback_channels" type="number" min="0" max="256"></label>
-      <label class="f">ALSA period, frames (0 = default)<input id="period_frames" type="number" min="0" max="8192"></label>
+    <p class="hint">This plugin does not create a sound card — it opens one that exists and connects its jacks to the network.
+      To make the network a device in your desktop's sound settings, pick <b>Loopback PCM — Loopback</b>
+      (<span class="mono">hw:CARD=AES67,DEV=1</span>) for both input and output: your apps then play to and record from
+      “Loopback Analog Stereo”. The stack loads that virtual card (<span class="mono">snd-aloop</span>) at launch —
+      see <span class="mono">docker logs Plugin-AES67-Loopback</span> if it is missing.</p>
+    <div class="flow">
+      <div class="side">
+        <h3>① Card <b>inputs</b> → Senders → network</h3>
+        <p class="hint">Mic / line in. What these channels hear is sent as your AES67 streams (TX).</p>
+        <div class="form">
+          <label class="f">Input device (capture)<select id="capture_device"></select></label>
+          <label class="f">Input channels to open (0 = device default)<input id="capture_channels" type="number" min="0" max="256"></label>
+        </div>
+        <div class="devstate" id="cap-state"></div>
+      </div>
+      <div class="side">
+        <h3>② Network → Receivers → card <b>outputs</b></h3>
+        <p class="hint">Speakers / line out. Streams you receive (RX) are played here.</p>
+        <div class="form">
+          <label class="f">Output device (playback)<select id="playback_device"></select></label>
+          <label class="f">Output channels to open (0 = device default)<input id="playback_channels" type="number" min="0" max="256"></label>
+        </div>
+        <div class="devstate" id="play-state"></div>
+      </div>
     </div>
-    <p class="hint">Card channels are numbered from 1. A sender reading a channel the card lacks sends silence on it.</p>
+    <div class="form" style="margin-top:12px">
+      <label class="f">ALSA period, frames (0 = default; 64–256 for low latency)<input id="period_frames" type="number" min="0" max="8192"></label>
+    </div>
+    <p class="hint">Which channel goes where is set on the <a href="/matrix">MATRIX</a> tab. Card channels count from 1; a channel the card lacks is silent.</p>
   </section>
 
+  <section><h2>SAP configuration</h2>
+    <div class="form">
+      <label class="f chk"><input id="sap_listen" type="checkbox"> SAP browsing enabled</label>
+      <label class="f chk"><input id="sap_announce" type="checkbox"> SAP announcing enabled</label>
+      <label class="f">Multicast address<input id="sap_group" class="mono" placeholder="239.255.255.255"></label>
+      <label class="f">Port<input id="sap_port" type="number" min="1" max="65535"></label>
+      <label class="f">Announce TTL<input id="sap_ttl" type="number" min="1" max="255"></label>
+      <label class="f">Announce interval (s)<input id="sap_interval" type="number" min="5" max="300"></label>
+      <label class="f">Session timeout (seconds)<input id="sap_timeout" type="number" min="30" max="86400"></label>
+    </div>
+    <p class="hint">Browsing fills the Receivers tab's stream list. Announcing sends each sender that has <b>SAP</b> ticked on the Senders tab. Dante, RAVENNA and most AES67 gear use <span class="mono">239.255.255.255:9875</span>.</p>
+  </section>
+
+  <section><h2>RAVENNA</h2>
+    <div class="form">
+      <label class="f">RTSP port (DESCRIBE)<input id="rtsp_port" type="number" min="1" max="65535"></label>
+    </div>
+    <p class="hint">Senders with <b>RAVENNA</b> ticked are advertised over mDNS as <span class="mono">_ravenna_session._sub._rtsp._tcp</span>; receivers fetch the SDP with <span class="mono">DESCRIBE rtsp://&lt;node&gt;:&lt;port&gt;/by-name/&lt;session&gt;</span>. The port is carried in the mDNS record, so it need not be 554.</p>
+  </section>
+  </div>
+
+  <div class="tab" id="tab-senders">
   <section><h2>Senders <span class="chip" id="tx-limit"></span></h2>
     <p class="hint">Card channels as a list or range: <span class="mono">1-8</span>, <span class="mono">9,10</span>. Up to 8 per stream. ST 2110-30 needs a conformance level: A = 1 ms ≤ 8 ch, B/C = 125 µs.</p>
     <div class="scroll"><table>
-      <thead><tr><th>On</th><th>#</th><th>Name</th><th>Profile</th><th>Format</th><th>Packet</th><th>Multicast group</th><th>Port</th><th>TTL</th><th>PT</th><th>Card channels</th><th></th></tr></thead>
+      <thead><tr><th>On</th><th>#</th><th>Name</th><th>Profile</th><th>Format</th><th>Packet</th><th>Multicast group</th><th>Port</th><th>TTL</th><th>PT</th><th>Card channels</th><th title="Announce over SAP">SAP</th><th title="Advertise over mDNS + RTSP">RAVENNA</th><th></th><th></th></tr></thead>
       <tbody id="tx"></tbody>
     </table></div>
     <button id="add-tx" style="margin-top:10px">+ Add sender</button>
   </section>
+  </div>
 
+  <div class="tab" id="tab-receivers">
   <section><h2>Receivers <span class="chip" id="rx-limit"></span></h2>
     <p class="hint">Pick a stream heard over SAP (the receiver follows it if it moves), or paste an SDP. Routing lists the playback channel for each stream channel: <span class="mono">1-8</span>, or <span class="mono">3,4,-,-</span> to leave some unrouted.</p>
     <div class="scroll"><table>
@@ -62,7 +118,16 @@
     </table></div>
     <button id="add-rx" style="margin-top:10px">+ Add receiver</button>
   </section>
+  </div>
 </main>
+<dialog id="sdp-dlg">
+  <h3 id="sdp-title">SDP</h3>
+  <div class="sdp-meta" id="sdp-meta"></div>
+  <pre id="sdp-text"></pre>
+  <div class="sdp-actions">
+    <button id="sdp-refresh">Refresh</button><button id="sdp-copy">Copy</button><button id="sdp-download">Download .sdp</button><button class="primary" id="sdp-close">Close</button>
+  </div>
+</dialog>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -101,7 +166,7 @@ function parseList(text, allowGaps) {
   return out;
 }
 function listText(list) {
-  const ones = list.map(c => c == null ? null : c + 1);
+  const ones = list.map(c => c == null || c >= 65535 ? null : c + 1);
   if (ones.length > 1 && ones.every((c, i) => c != null && (i === 0 || c === ones[i - 1] + 1))) return `${ones[0]}-${ones[ones.length - 1]}`;
   return ones.map(c => c ?? '-').join(',');
 }
@@ -119,6 +184,9 @@ function renderTx() {
     <td><input class="w-s" type="number" data-k="ttl" data-num value="${s.ttl}"></td>
     <td><input class="w-s" type="number" data-k="payload_type" data-num value="${s.payload_type}"></td>
     <td><input class="w-m mono" data-k="channels" data-list value="${listText(s.channels)}"></td>
+    <td class="c"><input type="checkbox" data-k="sap" ${s.sap !== false ? 'checked' : ''} title="Announce over SAP"></td>
+    <td class="c"><input type="checkbox" data-k="ravenna" ${s.ravenna ? 'checked' : ''} title="Advertise RAVENNA (mDNS + RTSP)"></td>
+    <td><button data-sdp>SDP</button></td>
     <td><button data-del>Remove</button></td></tr>`).join('');
   $('tx-limit').textContent = `${S.sources.length} / ${LIMITS.sources}`;
   $('add-tx').disabled = S.sources.length >= LIMITS.sources;
@@ -158,7 +226,7 @@ function bindTable(tbodyId, list, render) {
     const item = S[list][+row.dataset.i], k = el.dataset.k;
     try {
       if (el.type === 'checkbox') item[k] = el.checked;
-      else if ('list' in el.dataset) item[k] = parseList(el.value, false);
+      else if ('list' in el.dataset) item[k] = parseList(el.value, true).map(c => c == null ? 65535 : c);
       else if ('map' in el.dataset) item[k] = parseList(el.value, true);
       else if ('num' in el.dataset) item[k] = Number(el.value);
       else if (k === 'stream') {
@@ -171,6 +239,7 @@ function bindTable(tbodyId, list, render) {
     if (k === 'enabled' || k === 'stream') render();
   });
   $(tbodyId).addEventListener('click', ev => {
+    if ('sdp' in ev.target.dataset) { showSdp(+ev.target.closest('tr').dataset.i); return; }
     if (!('del' in ev.target.dataset)) return;
     S[list].splice(+ev.target.closest('tr').dataset.i, 1); openSdp.clear(); render();
   });
@@ -180,18 +249,30 @@ function fillForm(devices, ifaces) {
   const g = S;
   $('node_name').value = g.node_name; $('sample_rate').value = g.sample_rate;
   $('clock_source').value = g.clock.source; $('ptp_domain').value = g.clock.domain;
-  $('sap_announce').value = String(g.sap.announce); $('sap_listen').value = String(g.sap.listen);
+  $('sap_announce').checked = !!g.sap.announce; $('sap_listen').checked = !!g.sap.listen;
   $('sap_interval').value = g.sap.interval_s; $('http_port').value = g.http_port;
+  $('sap_group').value = g.sap.group; $('sap_port').value = g.sap.port; $('sap_ttl').value = g.sap.ttl;
+  $('sap_timeout').value = g.sap.timeout_s; $('rtsp_port').value = g.rtsp_port;
   $('capture_channels').value = g.audio.capture_channels; $('playback_channels').value = g.audio.playback_channels;
   $('period_frames').value = g.audio.period_frames;
   const ifOpts = opt('', 'Automatic (first physical, up)', g.interface) +
     ifaces.filter(i => !i.loopback).map(i => opt(i.name, `${i.name} — ${i.ipv4}${i.up ? '' : ' (down)'}`, g.interface)).join('');
   $('interface').innerHTML = ifOpts + (g.interface && !ifaces.some(i => i.name === g.interface) ? opt(g.interface, g.interface + ' (missing)', g.interface) : '');
-  const devOpts = (list, cur) => opt('', 'System default', cur) +
-    list.map(d => opt(d.name, `${d.name} — ${d.max_channels} ch${d.rates.length ? ', ' + d.rates.map(r => r / 1000 + 'k').join('/') : ''}`, cur)).join('') +
-    (cur && !list.some(d => d.name === cur) ? opt(cur, cur + ' (not found)', cur) : '');
+  // Hardware first and named for a person; ALSA's virtual names after, in
+  // their own group. `hw:` is the jack itself, `plughw:` the same jack with
+  // ALSA converting format/rate/channels for us.
+  const devOpts = (list, cur, used) => {
+    const text = d => `${d.label ? d.label + '  ·  ' : ''}${d.name} — ${d.max_channels} ch` +
+      (d.rates.length ? ', ' + d.rates.map(r => r / 1000 + 'k').join('/') : '') + (d.in_use ? '  ✓ open now' : '');
+    const hw = list.filter(d => d.label), virt = list.filter(d => !d.label);
+    return opt('', 'System default (card 0 — often HDMI; pick a device)', cur) +
+      (hw.length ? `<optgroup label="Sound cards">${hw.map(d => opt(d.name, text(d), cur)).join('')}</optgroup>` : '') +
+      (virt.length ? `<optgroup label="ALSA virtual devices">${virt.map(d => opt(d.name, text(d), cur)).join('')}</optgroup>` : '') +
+      (cur && !list.some(d => d.name === cur) ? opt(cur, cur + (used ? '' : '  — unavailable (unplugged, or held by another program such as the host’s PipeWire)'), cur) : '');
+  };
   $('capture_device').innerHTML = devOpts(devices.capture || [], g.audio.capture_device);
   $('playback_device').innerHTML = devOpts(devices.playback || [], g.audio.playback_device);
+  DEVICES = devices;
   renderTx(); renderRx();
 }
 
@@ -199,12 +280,38 @@ function collect() {
   const s = S;
   s.node_name = $('node_name').value.trim(); s.interface = $('interface').value;
   s.sample_rate = +$('sample_rate').value; s.clock.source = $('clock_source').value; s.clock.domain = +$('ptp_domain').value;
-  s.sap.announce = $('sap_announce').value === 'true'; s.sap.listen = $('sap_listen').value === 'true';
+  s.sap.announce = $('sap_announce').checked; s.sap.listen = $('sap_listen').checked;
   s.sap.interval_s = +$('sap_interval').value; s.http_port = +$('http_port').value;
+  s.sap.group = $('sap_group').value.trim(); s.sap.port = +$('sap_port').value; s.sap.ttl = +$('sap_ttl').value;
+  s.sap.timeout_s = +$('sap_timeout').value; s.rtsp_port = +$('rtsp_port').value;
   s.audio.capture_device = $('capture_device').value; s.audio.playback_device = $('playback_device').value;
   s.audio.capture_channels = +$('capture_channels').value; s.audio.playback_channels = +$('playback_channels').value;
   s.audio.period_frames = +$('period_frames').value;
   return s;
+}
+
+// What each side actually opened as, under its picker — and the mistakes a
+// person cannot see from a device name: too many channels, a rate the card
+// cannot do, an HDMI port picked for speakers.
+let DEVICES = {};
+function sideState(el, s, asked, rate) {
+  if (!s) { el.innerHTML = ''; return; }
+  const warn = [];
+  if (s.open && asked && asked > s.channels) warn.push(`asked for ${asked} channels, the device opened ${s.channels}`);
+  if (s.open && s.rate && s.rate !== rate) warn.push(`runs at ${s.rate / 1000} kHz, not ${rate / 1000} kHz — everything is resampled`);
+  const label = s.device ? ((DEVICES.capture || []).concat(DEVICES.playback || []).find(d => d.name === s.device)?.label || '') : '';
+  if (/HDMI/.test(label)) warn.push('this is an HDMI (display) output, not the analog jacks');
+  el.innerHTML = s.open
+    ? `<span class="dot ok"></span>Open: <b>${esc(label || s.device)}</b> · ${s.channels} ch · ${s.rate / 1000} kHz · ${esc(s.format)}` +
+      warn.map(w => `<br><span class="warn">⚠ ${esc(w)}</span>`).join('')
+    : `<span class="dot bad"></span><span class="bad">Not open: ${esc(s.error || 'no device')}</span>`;
+}
+async function refreshState() {
+  try {
+    const st = await (await fetch('/api/status')).json();
+    sideState($('cap-state'), st.audio?.capture, S.audio.capture_channels, S.sample_rate);
+    sideState($('play-state'), st.audio?.playback, S.audio.playback_channels, S.sample_rate);
+  } catch (e) {}
 }
 
 async function load() {
@@ -214,12 +321,13 @@ async function load() {
   ]);
   S = st.settings; LIMITS = st.limits || LIMITS; SAP = sap; openSdp.clear();
   fillForm(dev, ifs);
+  refreshState();
 }
 
 $('add-tx').onclick = () => {
   const id = Math.max(0, ...S.sources.map(x => x.id), ...S.sinks.map(x => x.id)) + 1;
   S.sources.push({id, enabled: true, name: `TX ${String(S.sources.length + 1).padStart(2, '0')}`, profile: 'aes67',
-    address: `239.69.0.${(id % 250) + 1}`, port: 5004, ttl: 32, dscp: 34, payload_type: 97, encoding: 'L24', ptime_us: 1000, channels: [0, 1]});
+    address: `239.69.0.${(id % 250) + 1}`, port: 5004, ttl: 32, dscp: 34, payload_type: 97, encoding: 'L24', ptime_us: 1000, channels: [0, 1], sap: true, ravenna: false});
   renderTx();
 };
 $('add-rx').onclick = () => {
@@ -233,13 +341,61 @@ $('save').onclick = async () => {
     const r = await api('PUT', '/api/settings', collect());
     S = r.settings; openSdp.clear(); renderTx(); renderRx();
     banner('Saved and applied.', true);
+    setTimeout(refreshState, 1500);
   } catch (e) { banner(e.message); }
   $('save').disabled = false;
 };
 $('reload').onclick = () => load().then(() => banner('Reloaded the saved settings.', true));
+// ── Tabs: one page, the path picks the tab, switching keeps unsaved edits.
+function showTab(name, push) {
+  if (!['config', 'senders', 'receivers'].includes(name)) name = 'config';
+  for (const t of document.querySelectorAll('.tab')) t.classList.toggle('on', t.id === 'tab-' + name);
+  for (const a of document.querySelectorAll('nav a[data-tab]')) a.classList.toggle('on', a.dataset.tab === name);
+  if (push && location.pathname !== '/' + name) history.pushState({}, '', '/' + name);
+}
+for (const a of document.querySelectorAll('nav a[data-tab]'))
+  a.addEventListener('click', ev => { ev.preventDefault(); showTab(a.dataset.tab, true); });
+window.addEventListener('popstate', () => showTab(location.pathname.slice(1)));
+showTab(location.pathname.slice(1));
+
+// ── SDP of one sender, exactly as the form holds it now (saved or not).
+let sdpRow = null, sdpText = '';
+async function showSdp(i) {
+  sdpRow = i;
+  const src = S.sources[i], dlg = $('sdp-dlg');
+  $('sdp-title').textContent = `SDP — ${src.name}`;
+  $('sdp-text').textContent = 'Generating…'; $('sdp-meta').innerHTML = '';
+  if (!dlg.open) dlg.showModal();
+  try {
+    const r = await api('POST', '/api/sources/sdp', {source: src, settings: collect()});
+    sdpText = r.sdp; $('sdp-text').textContent = r.sdp;
+    const sap = r.sap || {}, rav = r.ravenna || {};
+    const sapState = !sap.wanted ? 'off for this sender' : !sap.node_announces ? 'ticked, but node announcing is off (Config tab)' : `announced to ${sap.group}:${sap.port}`;
+    const ravState = !rav.wanted ? 'off for this sender' : rav.advertised ? 'advertised' : 'ticked — advertised once saved and running';
+    $('sdp-meta').innerHTML =
+      `<span class="pill ${r.live ? 'live' : 'preview'}">${r.live ? 'LIVE — the sender is sending this' : 'PREVIEW — from the current settings; not running as shown'}</span>` +
+      `<span>SAP: ${esc(sapState)}</span><span>RAVENNA: ${esc(ravState)}</span>` +
+      (r.rtsp_url ? `<span class="mono">${esc(r.rtsp_url)}</span>` : '');
+  } catch (e) { sdpText = ''; $('sdp-text').textContent = 'Cannot build an SDP for this row: ' + e.message; }
+}
+$('sdp-refresh').onclick = () => sdpRow != null && showSdp(sdpRow);
+$('sdp-close').onclick = () => $('sdp-dlg').close();
+$('sdp-copy').onclick = async () => {
+  try { await navigator.clipboard.writeText(sdpText); banner('SDP copied.', true); }
+  catch (e) { const r = document.createRange(); r.selectNodeContents($('sdp-text')); getSelection().removeAllRanges(); getSelection().addRange(r); banner('Selected — press Ctrl+C to copy.', true); }
+};
+$('sdp-download').onclick = () => {
+  if (!sdpText) return;
+  const name = (S.sources[sdpRow]?.name || 'sender').replace(/[^\w.-]+/g, '_');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([sdpText], {type: 'application/sdp'}));
+  a.download = name + '.sdp'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+
 bindTable('tx', 'sources', renderTx);
 bindTable('rx', 'sinks', renderRx);
 load().catch(e => banner('Could not load settings: ' + e.message));
+setInterval(() => S && refreshState(), 3000);
 setInterval(async () => { try { SAP = await api('GET', '/api/browse'); } catch (e) {} }, 10000);
 </script>
 </body>

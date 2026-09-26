@@ -160,16 +160,17 @@ impl Daemon {
         inner.clock = Clock::start(s.clock_source(), s.clock.domain, inner.iface.as_ref());
         self.log(format!("clock: {:?}, domain {}", s.clock_source(), s.clock.domain));
 
-        inner.sap_socket = inner.iface.as_ref().and_then(|i| crate::net::sender(i.ipv4, 32, 34).ok());
+        inner.sap_socket = inner.iface.as_ref().and_then(|i| crate::net::sender(i.ipv4, s.sap.ttl, 34).ok());
+        self.browser.set_timeout(s.sap.timeout_s);
         inner.next_announce = Instant::now() + Duration::from_secs(2);
         let stop = Arc::new(AtomicBool::new(false));
         inner.sap_stop = Arc::clone(&stop);
         if let (true, Some(i)) = (s.sap.listen, &inner.iface) {
-            let (browser, ip) = (Arc::clone(&self.browser), i.ipv4);
+            let (browser, ip, group, port) = (Arc::clone(&self.browser), i.ipv4, s.sap.group, s.sap.port);
             std::thread::Builder::new()
                 .name("aes67:sap".into())
                 .spawn(move || {
-                    if let Err(e) = sap::listen(browser, ip, stop) {
+                    if let Err(e) = sap::listen(browser, ip, group, port, stop) {
                         eprintln!("⚠️  [aes67] SAP listener: {e}");
                     }
                 })
@@ -215,8 +216,22 @@ impl Daemon {
             .map(|e| (e.capture.rate, e.playback.rate))
             .unwrap_or((0, 0));
 
-        // Transmitters.
+        // Transmitters. A change of card channels alone is re-routed in place
+        // (the MATRIX page); anything else about a sender restarts it.
         let wanted: BTreeMap<u32, &Source> = s.sources.iter().filter(|x| x.enabled).map(|x| (x.id, x)).collect();
+        if !force {
+            for (id, tx) in inner.txs.iter_mut() {
+                if let Some(w) = wanted.get(id) {
+                    if w.same_stream(&tx.cfg) && **w != tx.cfg {
+                        // Announcement flags are not the stream: take them
+                        // in place, like a re-route, with no restart.
+                        tx.cfg.sap = w.sap;
+                        tx.cfg.ravenna = w.ravenna;
+                        tx.reroute(w);
+                    }
+                }
+            }
+        }
         inner.txs.retain(|id, tx| !force && wanted.get(id).is_some_and(|w| **w == tx.cfg));
         for (id, src) in wanted {
             if !inner.txs.contains_key(&id) {
@@ -237,6 +252,15 @@ impl Daemon {
         let wanted: Vec<&Sink> = s.sinks.iter().filter(|x| x.enabled).collect();
         let effective: BTreeMap<u32, Option<String>> =
             wanted.iter().map(|k| (k.id, self.effective_sdp(k))).collect();
+        if !force {
+            for (id, rx) in inner.rxs.iter_mut() {
+                if let Some(w) = wanted.iter().find(|k| k.id == *id) {
+                    if (Sink { map: rx.cfg.map.clone(), ..(*w).clone() }) == rx.cfg && w.map != rx.cfg.map {
+                        rx.reroute(w);
+                    }
+                }
+            }
+        }
         inner.rxs.retain(|id, rx| {
             !force
                 && wanted.iter().any(|k| k.id == *id && **k == rx.cfg)
@@ -287,9 +311,10 @@ impl Daemon {
             self.reconcile_streams(&mut inner, &s, false);
         }
         let origin = inner.iface.as_ref().map(|i| i.ipv4);
+        let sap_to = std::net::SocketAddrV4::new(s.sap.group, s.sap.port);
         if let (Some(socket), Some(origin)) = (&inner.sap_socket, origin) {
             let current: BTreeMap<u32, String> = if s.sap.announce {
-                inner.txs.iter().map(|(id, tx)| (*id, tx.sdp.clone())).collect()
+                inner.txs.iter().filter(|(_, tx)| tx.cfg.sap).map(|(id, tx)| (*id, tx.sdp.clone())).collect()
             } else {
                 BTreeMap::new()
             };
@@ -300,21 +325,73 @@ impl Daemon {
                 .map(|(_, sdp)| sdp.clone())
                 .collect();
             if !gone.is_empty() {
-                sap::announce(socket, origin, &gone, true);
+                sap::announce(socket, origin, sap_to, &gone, true);
             }
             let changed = current != inner.announced;
             if changed || Instant::now() >= inner.next_announce {
                 let sdps: Vec<String> = current.values().cloned().collect();
-                sap::announce(socket, origin, &sdps, false);
+                sap::announce(socket, origin, sap_to, &sdps, false);
                 inner.next_announce = Instant::now() + Duration::from_secs(s.sap.interval_s.clamp(5, 300) as u64);
             }
             inner.announced = current;
         }
+        // RAVENNA: the running senders that ask for it, advertised over mDNS
+        // and served over RTSP. Stopped senders are withdrawn by the same call.
+        let ravenna: Vec<crate::ravenna::Session> = inner
+            .txs
+            .values()
+            .filter(|tx| tx.cfg.ravenna)
+            .filter_map(|tx| crate::ravenna::Session::from_sdp(tx.cfg.id, &tx.sdp))
+            .collect();
+        crate::ravenna::sync(origin, s.rtsp_port, &Self::node_name(&s), ravenna);
+    }
+
+    /// The SDP a sender IS, or — when it is not running as configured — the
+    /// SDP it WOULD send with `src` exactly as given (the form's unsaved row,
+    /// for `/config`'s SDP button). `live` says which. A preview carries this
+    /// moment as its `o=` version; the running one keeps its start version.
+    pub fn preview_sdp(&self, src: &Source) -> Result<(String, bool), String> {
+        self.preview_sdp_with(src, None)
+    }
+
+    /// As [`preview_sdp`](Self::preview_sdp), with the node-wide settings the
+    /// form holds (`pending`) — sample rate and node name — instead of the
+    /// saved ones. The interface address is always the one in use.
+    pub fn preview_sdp_with(&self, src: &Source, pending: Option<&Settings>) -> Result<(String, bool), String> {
+        let inner = self.lock();
+        let saved = inner.settings.clone();
+        let s = pending.unwrap_or(&saved);
+        src.validate(s.sample_rate).map_err(|e| format!("{}: {e}", src.name))?;
+        let node_same = Self::node_name(s) == Self::node_name(&saved) && s.sample_rate == saved.sample_rate;
+        if let Some(tx) = inner.txs.get(&src.id).filter(|tx| node_same && tx.cfg.same_stream(src)) {
+            return Ok((tx.sdp.clone(), true));
+        }
+        let ip = inner
+            .iface
+            .as_ref()
+            .map(|i| i.ipv4)
+            .ok_or_else(|| "no usable network interface, so no origin address for the SDP".to_string())?;
+        let desc = crate::tx::describe(src, s.sample_rate, ip, &Self::node_name(s), inner.clock.refclk());
+        Ok((crate::sdp::generate(&desc), false))
+    }
+
+    /// Where a RAVENNA receiver would DESCRIBE `src`, if it were advertised.
+    pub fn rtsp_url(&self, src: &Source) -> Option<String> {
+        let inner = self.lock();
+        let ip = inner.iface.as_ref()?.ipv4;
+        let node = Self::node_name(&inner.settings);
+        let session = if node.is_empty() { src.name.clone() } else { format!("{node} {}", src.name) };
+        Some(format!("rtsp://{ip}:{}/by-name/{}", inner.settings.rtsp_port, crate::ravenna::url_encode(&session)))
     }
 
     /// The SDP of a running source — for `GET /api/sources/{id}/sdp`.
+    /// Not running: the SDP its saved settings would produce.
     pub fn source_sdp(&self, id: u32) -> Option<String> {
-        self.lock().txs.get(&id).map(|t| t.sdp.clone())
+        if let Some(sdp) = self.lock().txs.get(&id).map(|t| t.sdp.clone()) {
+            return Some(sdp);
+        }
+        let src = self.settings().sources.into_iter().find(|x| x.id == id)?;
+        self.preview_sdp(&src).ok().map(|(sdp, _)| sdp)
     }
 
     /// Is the agent seeing anything? For the contract's `Agent/state`.
@@ -400,7 +477,10 @@ impl Daemon {
                 "listen": s.sap.listen,
                 "listening": self.browser.listening.load(Ordering::Relaxed) > 0,
                 "sessions": self.browser.list(&local_ips).len(),
+                "group": s.sap.group,
+                "port": s.sap.port,
             },
+            "ravenna": crate::ravenna::status(),
             "events": self.events.lock().unwrap_or_else(|e| e.into_inner()).iter().rev().take(50)
                 .map(|(t, text)| json!({"t": t, "text": text})).collect::<Vec<_>>(),
         })
@@ -426,7 +506,25 @@ impl Daemon {
     }
 
     pub fn devices(&self) -> Value {
-        let (capture, playback) = audio::list_devices();
+        let (mut capture, mut playback) = audio::list_devices();
+        // The devices this plugin holds are busy, so enumeration left them
+        // out: put them back, marked, with what they opened as.
+        if let Some(engine) = self.lock().engine.as_ref() {
+            for (list, side, input) in [(&mut capture, &engine.capture, true), (&mut playback, &engine.playback, false)] {
+                let Some(name) = side.device.clone().filter(|_| side.open) else { continue };
+                match list.iter_mut().find(|d| d.name == name) {
+                    Some(d) => d.in_use = true,
+                    None => list.insert(0, audio::DeviceInfo {
+                        label: audio::friendly_name(&name, input),
+                        name,
+                        max_channels: side.channels as u16,
+                        rates: vec![side.rate],
+                        default_rate: Some(side.rate),
+                        in_use: true,
+                    }),
+                }
+            }
+        }
         json!({ "capture": capture, "playback": playback })
     }
 

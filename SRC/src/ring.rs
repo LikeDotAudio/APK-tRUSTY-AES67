@@ -238,11 +238,21 @@ impl DriftReader {
 /// patterns order like the numbers, so `fetch_max` on the bits is a max.
 pub struct Meter {
     peaks: Vec<AtomicU32>,
+    /// The last reading and when it was taken. Several readers (the status
+    /// page, the matrix, the bus restate) share one meter; without this each
+    /// read would reset the peaks and the others would see silence.
+    last: std::sync::Mutex<(Option<std::time::Instant>, Vec<f32>)>,
 }
+
+/// Reads closer together than this share one reading.
+const METER_SHARE: std::time::Duration = std::time::Duration::from_millis(250);
 
 impl Meter {
     pub fn new(channels: usize) -> Meter {
-        Meter { peaks: (0..channels).map(|_| AtomicU32::new(0)).collect() }
+        Meter {
+            peaks: (0..channels).map(|_| AtomicU32::new(0)).collect(),
+            last: std::sync::Mutex::new((None, vec![-120.0; channels])),
+        }
     }
 
     pub fn feed(&self, interleaved: &[f32]) {
@@ -259,15 +269,24 @@ impl Meter {
         }
     }
 
-    /// dBFS per channel since the last take, and reset. −120 is silence.
+    /// dBFS per channel since the last take, and reset — or that same
+    /// reading again, to a reader arriving within METER_SHARE of it. −120 is
+    /// silence. Only readers touch the lock; the audio callback never does.
     pub fn take_dbfs(&self) -> Vec<f32> {
-        self.peaks
+        let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
+        if last.0.is_some_and(|at| at.elapsed() < METER_SHARE) {
+            return last.1.clone();
+        }
+        let reading: Vec<f32> = self
+            .peaks
             .iter()
             .map(|p| {
                 let v = f32::from_bits(p.swap(0, Ordering::Relaxed));
                 if v <= 1e-6 { -120.0 } else { (20.0 * v.log10()).max(-120.0) }
             })
-            .collect()
+            .collect();
+        *last = (Some(std::time::Instant::now()), reading.clone());
+        reading
     }
 }
 
@@ -329,6 +348,10 @@ mod tests {
         m.feed(&[0.5, -1.0, 0.25, 0.0]);
         let db = m.take_dbfs();
         assert!((db[0] + 6.02).abs() < 0.05 && db[1].abs() < 0.01, "{db:?}");
+        // A second reader right behind the first sees the same reading…
+        assert_eq!(m.take_dbfs(), db);
+        // …and a later one sees what came since, which is nothing.
+        std::thread::sleep(METER_SHARE + std::time::Duration::from_millis(20));
         assert_eq!(m.take_dbfs(), vec![-120.0, -120.0]);
     }
 }

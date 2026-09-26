@@ -38,6 +38,10 @@ pub struct Settings {
     pub audio: AudioSettings,
     pub sap: SapSettings,
     pub http_port: u16,
+    /// TCP port of the RTSP server RAVENNA receivers DESCRIBE our senders on.
+    /// Advertised in the mDNS SRV record, so it need not be 554 — and 554 is
+    /// privileged, which this container would have to be granted.
+    pub rtsp_port: u16,
     pub sources: Vec<Source>,
     pub sinks: Vec<Sink>,
 }
@@ -68,6 +72,15 @@ pub struct SapSettings {
     pub announce: bool,
     pub listen: bool,
     pub interval_s: u32,
+    /// The SAP group. 239.255.255.255 (global scope) is what Dante, RAVENNA
+    /// and the aes67 daemons use; 239.195.255.255 is the organisation-local
+    /// alternative RFC 2974 names.
+    pub group: Ipv4Addr,
+    pub port: u16,
+    /// Multicast TTL of our announcements.
+    pub ttl: u8,
+    /// A heard session silent this long is forgotten.
+    pub timeout_s: u32,
 }
 
 /// A transmitter: some capture channels of the card, out as one RTP stream.
@@ -88,6 +101,21 @@ pub struct Source {
     pub ptime_us: u32,
     /// Capture-card channel (0-based) feeding each stream channel, in order.
     pub channels: Vec<u16>,
+    /// Announce this sender's SDP over SAP (needs the node's SAP announce on).
+    pub sap: bool,
+    /// Advertise it RAVENNA-style: mDNS `_ravenna_session._sub._rtsp._tcp`,
+    /// SDP served to RTSP `DESCRIBE …/by-name/<session>`.
+    pub ravenna: bool,
+}
+
+impl Source {
+    /// Equal as a STREAM — everything but how it is announced and which card
+    /// channels feed it. Toggling an announcement must not restart the
+    /// sender: a restart is a new SSRC and a new SDP version for every
+    /// receiver already locked to it.
+    pub fn same_stream(&self, other: &Source) -> bool {
+        Source { sap: other.sap, ravenna: other.ravenna, channels: other.channels.clone(), ..self.clone() } == *other
+    }
 }
 
 /// A receiver: one RTP stream, its channels onto playback channels of the card.
@@ -118,6 +146,7 @@ impl Default for Settings {
             audio: AudioSettings::default(),
             sap: SapSettings::default(),
             http_port: 8130,
+            rtsp_port: 8554,
             sources: Vec::new(),
             sinks: Vec::new(),
         }
@@ -132,7 +161,15 @@ impl Default for ClockSettings {
 
 impl Default for SapSettings {
     fn default() -> Self {
-        SapSettings { announce: true, listen: true, interval_s: 30 }
+        SapSettings {
+            announce: true,
+            listen: true,
+            interval_s: 30,
+            group: crate::sap::GROUP,
+            port: crate::sap::PORT,
+            ttl: 32,
+            timeout_s: 300,
+        }
     }
 }
 
@@ -151,6 +188,8 @@ impl Default for Source {
             encoding: Encoding::L24,
             ptime_us: 1000,
             channels: vec![0, 1],
+            sap: true,
+            ravenna: false,
         }
     }
 }
@@ -211,7 +250,12 @@ impl Settings {
         s.sap.announce = flag("sap_announce", true);
         s.sap.listen = flag("sap_listen", true);
         s.sap.interval_s = get("sap_interval_s").parse().unwrap_or(30);
+        s.sap.group = get("sap_group").parse().unwrap_or(crate::sap::GROUP);
+        s.sap.port = get("sap_port").parse().unwrap_or(crate::sap::PORT);
+        s.sap.ttl = get("sap_ttl").parse().unwrap_or(32);
+        s.sap.timeout_s = get("sap_timeout_s").parse().unwrap_or(300);
         s.http_port = get("http_port").parse().unwrap_or(8130);
+        s.rtsp_port = get("rtsp_port").parse().unwrap_or(8554);
         let slots = |k: &str, max: usize| get(k).parse::<usize>().unwrap_or(max).min(max);
         s.sources = (0..slots("source_slots", MAX_SOURCES)).map(Source::slot).collect();
         s.sinks = (0..slots("sink_slots", MAX_SINKS)).map(|i| Sink::slot(MAX_SOURCES + i)).collect();
@@ -265,6 +309,18 @@ impl Settings {
         }
         if self.http_port == 0 {
             return Err("http_port is 0".into());
+        }
+        if !self.sap.group.is_multicast() {
+            return Err(format!("SAP address {} is not a multicast group", self.sap.group));
+        }
+        if self.sap.port == 0 {
+            return Err("SAP port is 0".into());
+        }
+        if !(30..=86_400).contains(&self.sap.timeout_s) {
+            return Err(format!("SAP session timeout {} s is outside 30..86400", self.sap.timeout_s));
+        }
+        if self.rtsp_port == 0 || self.rtsp_port == self.http_port {
+            return Err(format!("rtsp_port {} must be set and differ from the web port", self.rtsp_port));
         }
         if self.sources.len() > MAX_SOURCES {
             return Err(format!("{} sources; at most {MAX_SOURCES}", self.sources.len()));

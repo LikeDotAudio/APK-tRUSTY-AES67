@@ -67,6 +67,12 @@ button:disabled { opacity: .5; cursor: default; }
 .banner.show { display: block; }
 .banner.err { background: color-mix(in srgb, var(--bad) 15%, transparent); color: var(--bad); }
 .banner.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px; }
+.flow .side { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+.flow h3 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.flow .form { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.devstate { margin-top: 10px; font-size: 12.5px; line-height: 1.6; }
+select optgroup { font-weight: 600; }
 tr.detail td { background: var(--bg); white-space: normal; }
 .hint { color: var(--muted); font-size: 12px; margin: 4px 0 10px; }
 a { color: var(--accent); }

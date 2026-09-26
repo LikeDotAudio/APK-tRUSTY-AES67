@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AES67 Matrix</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  :root { --x: 18px; --live: var(--ok); --idle: #ea580c; --na: color-mix(in srgb, var(--line) 30%, transparent); }
+  @media (prefers-color-scheme: dark) { :root { --idle: #fb923c; } }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-bottom: 12px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 12px; align-items: center; }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -3px; margin-right: 5px; border: 1px solid var(--line); }
+  .legend i.l { background: var(--live); border-color: var(--live); }
+  .legend i.o { background: var(--idle); border-color: var(--idle); }
+  .legend i.n { background: repeating-linear-gradient(45deg, var(--na) 0 3px, transparent 3px 6px); }
+  .bar label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
+  .bar .spacer { flex: 1; }
+  .mxwrap { overflow: auto; max-height: calc(100vh - 190px); border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  table.mx { border-collapse: separate; border-spacing: 0; width: auto; font-size: 11px; }
+  table.mx th, table.mx td { padding: 0; border: 0; white-space: nowrap; }
+  table.mx td { width: var(--x); min-width: var(--x); height: var(--x); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  table.mx td.r { cursor: pointer; }
+  table.mx td.r:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  table.mx td.na { background: repeating-linear-gradient(45deg, var(--na) 0 3px, transparent 3px 6px); cursor: not-allowed; }
+  table.mx td.on { position: relative; }
+  table.mx td.on::after { content: ""; position: absolute; width: 12px; height: 12px; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 50%; background: var(--idle); }
+  table.mx td.on.live::after { background: var(--live); }
+  table.mx td.gs, table.mx th.gs { border-left: 2px solid var(--muted); }
+  table.mx tr.gr > td, table.mx tr.gr > th { border-top: 2px solid var(--muted); }
+  table.mx thead th { position: sticky; background: var(--panel); z-index: 2; }
+  table.mx thead tr.g th { top: 0; height: 26px; padding: 0 4px; text-align: left; color: var(--ink); font-weight: 600; border-bottom: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+  table.mx thead tr.c th { top: 26px; height: 22px; width: var(--x); min-width: var(--x); text-align: center; color: var(--muted); font-weight: 500; border-bottom: 2px solid var(--muted); border-right: 1px solid var(--line); }
+  table.mx tbody th { position: sticky; background: var(--panel); z-index: 1; }
+  table.mx tbody th.gl { left: 0; min-width: 118px; max-width: 118px; padding: 0 6px; text-align: left; font-weight: 600; vertical-align: top; padding-top: 3px; border-right: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; }
+  table.mx tbody th.cl { left: 118px; min-width: 26px; height: var(--x); line-height: 1; text-align: center; color: var(--muted); font-weight: 500; border-right: 2px solid var(--muted); border-bottom: 1px solid var(--line); }
+  table.mx thead th.corner { left: 0; z-index: 3; text-align: left; vertical-align: bottom; padding: 4px 6px; color: var(--muted); font-weight: 500; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); }
+  th.sig { color: var(--live) !important; font-weight: 700 !important; }
+  .off { opacity: .55; }
+  th.hl, td.hl { background: color-mix(in srgb, var(--accent) 10%, var(--panel)) !important; }
+  .kind { font-weight: 400; color: var(--muted); font-size: 10px; margin-left: 4px; }
+  #tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--bg); padding: 4px 8px; border-radius: 6px; font-size: 12px; display: none; z-index: 10; max-width: 320px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AES67 / ST 2110-30 <small id="node">matrix</small></h1>
+  <nav><a href="/status">Status</a><a class="on" href="/matrix">MATRIX</a><a href="/config">Config</a><a href="/senders">Senders</a><a href="/receivers">Receivers</a></nav>
+  <span class="spacer"></span>
+  <span class="chip" id="summary">loading…</span>
+</header>
+<main>
+  <div class="banner" id="banner"></div>
+  <div class="bar">
+    <div class="legend">
+      <span><i class="l"></i>routed — audio or connection</span>
+      <span><i class="o"></i>routed — no audio, no connection</span>
+      <span><i></i>click to route</span>
+      <span><i class="n"></i>not a route</span>
+    </div>
+    <span class="spacer"></span>
+    <label><input type="checkbox" id="hide-off"> Hide disabled streams</label>
+  </div>
+  <p class="hint">Rows are what comes <b>in</b>: the sound card's capture channels and every receiver's stream channels. Columns are what goes <b>out</b>: the sound card's playback channels and every sender's stream channels. Each sender channel takes one card input; each receiver channel feeds one card output (several receivers may feed the same output, and are summed). Click a crosspoint to make it; click it again to clear it. Changes apply live, without restarting the stream.</p>
+  <div class="mxwrap"><table class="mx" id="mx"></table></div>
+</main>
+<div id="tip"></div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const NONE = 65535, AUDIO_DB = -60;
+let S = null, ST = null, rows = [], cols = [], cells = [], topo = '', saving = Promise.resolve();
+
+function pref(k, v) {
+  try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; }
+}
+function banner(text, ok) {
+  const b = $('banner'); b.textContent = text; b.className = 'banner show ' + (ok ? 'ok' : 'err');
+  if (ok) setTimeout(() => b.className = 'banner', 2500);
+}
+async function api(method, path, body) {
+  const headers = {'Content-Type': 'application/json'};
+  const t = pref('apk-aes67-token'); if (t) headers.Authorization = 'Bearer ' + t;
+  const r = await fetch(path, {method, headers, body: body ? JSON.stringify(body) : undefined});
+  if (r.status === 401) {
+    const tok = prompt('This node needs its API token (APK_AES67_TOKEN):');
+    if (tok) { pref('apk-aes67-token', tok); return api(method, path, body); }
+  }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+// ── How many card channels to draw: what the card opened with, else what
+//    the settings ask for, else enough to show every route that exists.
+function cardCount(side, asked, routes) {
+  const a = ST?.audio?.[side];
+  if (a?.open && a.channels) return a.channels;
+  const used = routes.filter(c => c != null && c !== NONE).map(c => c + 1);
+  return Math.max(asked || 0, 2, ...used);
+}
+function rxChannels(k, i) {
+  const live = ST?.sinks?.find(x => x.config.id === k.id)?.live;
+  return Math.max(1, live?.stream?.channels || k.map.length || 1);
+}
+
+function layout() {
+  const hide = $('hide-off').checked;
+  const nIn = cardCount('capture', S.audio.capture_channels, S.sources.flatMap(s => s.channels));
+  const nOut = cardCount('playback', S.audio.playback_channels, S.sinks.flatMap(k => k.map));
+  rows = []; cols = [];
+  for (let c = 0; c < nIn; c++) rows.push({kind: 'cap', ch: c, group: 'CARD IN', gi: -1, first: c === 0, n: nIn});
+  S.sinks.forEach((k, i) => {
+    if (hide && !k.enabled) return;
+    const n = rxChannels(k, i);
+    for (let c = 0; c < n; c++) rows.push({kind: 'rx', si: i, ch: c, group: k.name, gi: i, first: c === 0, n, off: !k.enabled});
+  });
+  // CARD OUT FIRST, so the two quadrants that route sit on a diagonal —
+  // receivers → card at bottom left, card → senders at top right — and
+  // neither is a 128-column scroll away.
+  for (let c = 0; c < nOut; c++) cols.push({kind: 'out', ch: c, group: 'CARD OUT', first: c === 0, n: nOut});
+  S.sources.forEach((s, i) => {
+    if (hide && !s.enabled) return;
+    s.channels.forEach((_, c) => cols.push({kind: 'tx', si: i, ch: c, group: s.name, first: c === 0, n: s.channels.length, off: !s.enabled}));
+  });
+  return JSON.stringify([hide, rows.map(r => [r.kind, r.si, r.ch, r.group, r.off]), cols.map(c => [c.kind, c.si, c.ch, c.group, c.off])]);
+}
+
+function build() {
+  const key = layout();
+  if (key === topo) return;
+  topo = key;
+  let h = '<thead><tr class="g"><th class="corner" colspan="2" rowspan="2">in ↓ &nbsp; out →</th>';
+  for (const c of cols) if (c.first) {
+    const kind = c.kind === 'tx' ? 'sender' : 'card';
+    h += `<th class="gs${c.off ? ' off' : ''}" colspan="${c.n}" title="${esc(c.group)}">${esc(c.group)}<span class="kind">${kind}</span></th>`;
+  }
+  h += '</tr><tr class="c">';
+  cols.forEach((c, j) => h += `<th class="${c.first ? 'gs' : ''}${c.off ? ' off' : ''}" data-col="${j}">${c.ch + 1}</th>`);
+  h += '</tr></thead><tbody>';
+  rows.forEach((r, i) => {
+    h += `<tr class="${r.first ? 'gr' : ''}${r.off ? ' off' : ''}">`;
+    if (r.first) h += `<th class="gl" rowspan="${r.n}" title="${esc(r.group)}">${esc(r.group)}<br><span class="kind">${r.kind === 'cap' ? 'card' : 'receiver'}</span></th>`;
+    h += `<th class="cl" data-row="${i}">${r.ch + 1}</th>`;
+    cols.forEach((c, j) => {
+      const ok = (r.kind === 'cap' && c.kind === 'tx') || (r.kind === 'rx' && c.kind === 'out');
+      h += `<td class="${ok ? 'r' : 'na'}${c.first ? ' gs' : ''}" data-r="${i}" data-c="${j}"></td>`;
+    });
+    h += '</tr>';
+  });
+  $('mx').innerHTML = h + '</tbody>';
+  cells = rows.map((_, i) => Array.from($('mx').querySelectorAll(`td[data-r="${i}"]`)));
+}
+
+// ── Which crosspoints exist, from the settings.
+function routed() {
+  const on = [];
+  cols.forEach((c, j) => {
+    if (c.kind !== 'tx') return;
+    const src = S.sources[c.si].channels[c.ch];
+    const i = rows.findIndex(r => r.kind === 'cap' && r.ch === src);
+    if (i >= 0) on.push([i, j]);
+  });
+  rows.forEach((r, i) => {
+    if (r.kind !== 'rx') return;
+    const dst = S.sinks[r.si].map[r.ch];
+    const j = cols.findIndex(c => c.kind === 'out' && c.ch === dst);
+    if (dst != null && j >= 0) on.push([i, j]);
+  });
+  return on;
+}
+
+// ── Signal: audio above AUDIO_DB on the input or the stream, or a live
+//    connection (a sender sending from an open card; a receiver receiving
+//    onto an open card).
+function liveOf(kind, id) { return (kind === 'tx' ? ST?.sources : ST?.sinks)?.find(x => x.config.id === id)?.live; }
+function rowSignal(r) {
+  if (r.kind === 'cap') return (ST?.audio?.capture_dbfs?.[r.ch] ?? -120) > AUDIO_DB;
+  const l = liveOf('rx', S.sinks[r.si].id);
+  return !!l && ((l.level_dbfs?.[r.ch] ?? -120) > AUDIO_DB || l.state === 'receiving');
+}
+function colSignal(c) {
+  if (c.kind === 'out') return (ST?.audio?.playback_dbfs?.[c.ch] ?? -120) > AUDIO_DB;
+  const l = liveOf('tx', S.sources[c.si].id);
+  return !!l && ((l.level_dbfs?.[c.ch] ?? -120) > AUDIO_DB || (l.state === 'sending' && ST.audio?.capture?.open));
+}
+function pointSignal(r, c) {
+  if (r.kind === 'cap') {
+    const l = liveOf('tx', S.sources[c.si].id);
+    const audio = (ST?.audio?.capture_dbfs?.[r.ch] ?? -120) > AUDIO_DB || (l?.level_dbfs?.[c.ch] ?? -120) > AUDIO_DB;
+    return audio || (!!l && l.state === 'sending' && !!ST.audio?.capture?.open);
+  }
+  const l = liveOf('rx', S.sinks[r.si].id);
+  const audio = (l?.level_dbfs?.[r.ch] ?? -120) > AUDIO_DB;
+  return audio || (!!l && l.state === 'receiving' && !!ST.audio?.playback?.open);
+}
+
+function paint() {
+  if (!S) return;
+  build();
+  for (const row of cells) for (const td of row) td.classList.remove('on', 'live');
+  const on = routed();
+  let live = 0;
+  for (const [i, j] of on) {
+    const td = cells[i][j], sig = ST ? pointSignal(rows[i], cols[j]) : false;
+    td.classList.add('on'); if (sig) { td.classList.add('live'); live++; }
+  }
+  document.querySelectorAll('#mx th[data-row]').forEach(th => th.classList.toggle('sig', !!ST && rowSignal(rows[+th.dataset.row])));
+  document.querySelectorAll('#mx th[data-col]').forEach(th => th.classList.toggle('sig', !!ST && colSignal(cols[+th.dataset.col])));
+  $('summary').textContent = `${rows.length} in × ${cols.length} out · ${on.length} crosspoints · ${live} live`;
+}
+
+function describe(r, c) {
+  const a = r.kind === 'cap' ? `Card in ${r.ch + 1}` : `${r.group} ch ${r.ch + 1}`;
+  const b = c.kind === 'out' ? `Card out ${c.ch + 1}` : `${c.group} ch ${c.ch + 1}`;
+  return `${a} → ${b}`;
+}
+
+// ── A click: one source per sender channel, one destination per receiver
+//    channel. Saved at once, through the same validate-save-apply as /config.
+$('mx').addEventListener('click', ev => {
+  const td = ev.target.closest('td.r'); if (!td) return;
+  const r = rows[+td.dataset.r], c = cols[+td.dataset.c];
+  const before = JSON.stringify(S);
+  if (r.kind === 'cap') {
+    const list = S.sources[c.si].channels;
+    list[c.ch] = list[c.ch] === r.ch ? NONE : r.ch;
+  } else {
+    const k = S.sinks[r.si], n = rxChannels(k, r.si);
+    while (k.map.length < n) k.map.push(null);
+    k.map[r.ch] = k.map[r.ch] === c.ch ? null : c.ch;
+  }
+  paint();
+  const snapshot = JSON.parse(JSON.stringify(S));
+  saving = saving.then(() => api('PUT', '/api/settings', snapshot))
+    .then(() => banner(describe(r, c) + ' — applied', true))
+    .catch(e => { S = JSON.parse(before); topo = ''; paint(); banner(e.message); });
+});
+
+// ── Hover: light the row and column headers, and say what the point is.
+$('mx').addEventListener('mouseover', ev => {
+  document.querySelectorAll('#mx .hl').forEach(e => e.classList.remove('hl'));
+  const td = ev.target.closest('td'); const tip = $('tip');
+  if (!td) { tip.style.display = 'none'; return; }
+  const r = rows[+td.dataset.r], c = cols[+td.dataset.c];
+  document.querySelector(`#mx th[data-row="${td.dataset.r}"]`)?.classList.add('hl');
+  document.querySelector(`#mx th[data-col="${td.dataset.c}"]`)?.classList.add('hl');
+  const on = td.classList.contains('on');
+  tip.textContent = td.classList.contains('na') ? 'Not a route — ' + describe(r, c)
+    : describe(r, c) + (on ? (td.classList.contains('live') ? ' · signal' : ' · no signal') : ' · click to route');
+  tip.style.display = 'block';
+});
+$('mx').addEventListener('mousemove', ev => { const t = $('tip'); t.style.left = ev.clientX + 14 + 'px'; t.style.top = ev.clientY + 14 + 'px'; });
+$('mx').addEventListener('mouseleave', () => { $('tip').style.display = 'none'; document.querySelectorAll('#mx .hl').forEach(e => e.classList.remove('hl')); });
+
+$('hide-off').checked = pref('apk-aes67-matrix-hide') === '1';
+$('hide-off').onchange = () => { pref('apk-aes67-matrix-hide', $('hide-off').checked ? '1' : '0'); paint(); };
+
+async function tick() {
+  try {
+    ST = await (await fetch('/api/status')).json();
+    $('node').textContent = `${ST.node.name} · matrix`;
+    paint();
+  } catch (e) { $('summary').textContent = 'disconnected'; }
+}
+api('GET', '/api/settings').then(j => { S = j.settings; paint(); tick(); })
+  .catch(e => banner('Could not load settings: ' + e.message));
+setInterval(tick, 1000);
+// Settings changed on /config or over the bus are picked up here too.
+setInterval(async () => {
+  try {
+    await saving; // never read back over a click that is still being saved
+    const j = await api('GET', '/api/settings');
+    if (JSON.stringify(j.settings) !== JSON.stringify(S)) { S = j.settings; paint(); }
+  } catch (e) {}
+}, 5000);
+</script>
+</body>
+</html>
