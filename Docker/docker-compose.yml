@@ -1,4 +1,4 @@
-# APK:plugin:AES67 — AES67 / SMPTE ST 2110-30 senders and receivers bridged to an ALSA sound card, one container.
+# PLUGIN:AES67 — AES67 / SMPTE ST 2110-30 senders and receivers bridged to an ALSA sound card, one container.
 #
 # STARTED BY THE RUNNER WITH THE REST OF THE PLUGINS. discovery/Docker/docker-compose.yml
 # `include:`s this file, and DockTor reads the plugin roles off those files'
