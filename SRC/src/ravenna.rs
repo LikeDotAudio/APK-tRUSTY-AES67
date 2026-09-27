@@ -17,7 +17,7 @@
 //! announcement is a promise that audio is on the wire.
 //!
 //! THE PORT IS THE SRV RECORD'S, NOT 554. Receivers — this repo's own
-//! `plugin:RAVENNA` included — DESCRIBE the port mDNS gave them, so the server
+//! `PLUGIN:RAVENNA` included — DESCRIBE the port mDNS gave them, so the server
 //! listens on `rtsp_port` (default 8554) and needs no privileged bind.
 //!
 //! ONLY DESCRIBE. There is no SETUP/PLAY here: an AES67 stream is multicast

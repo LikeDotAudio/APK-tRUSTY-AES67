@@ -7,7 +7,7 @@
 #     python3 'PODS/K8:runner.py' up
 #     xdg-open http://127.0.0.1:8130/config        # 16 senders × 16 receivers, up to 8 channels each
 # By hand, alone (the same service, no other plugin):
-#     COMPOSE_PROFILES=aes67 docker compose -f 'PODS/POD:THICK/plugin/plugin:AES67/Docker/docker-compose.yml' up -d --build
+#     COMPOSE_PROFILES=aes67 docker compose -f 'PODS/POD:THICK/plugin/PLUGIN:AES67/Docker/docker-compose.yml' up -d --build
 # The image, the capability floor, the broker variables and the healthcheck are
 # the base service in discovery/Docker/plugin-base.yml; this file says only
 # what is THIS plugin's.
@@ -24,7 +24,7 @@ services:
   aes67-loopback:
     build:
       context: "../../../../.."
-      dockerfile: "PODS/POD:THICK/plugin/plugin:AES67/Docker/Dockerfile.loopback"
+      dockerfile: "PODS/POD:THICK/plugin/PLUGIN:AES67/Docker/Dockerfile.loopback"
     image: apk-aes67-loopback:local
     container_name: Plugin-AES67-Loopback
     profiles: [sound, aes67]

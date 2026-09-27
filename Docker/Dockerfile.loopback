@@ -1,7 +1,7 @@
 # APK:plugin:AES67 — the loopback launcher: loads the host's `snd-aloop` so the
 # AES67 network shows up as a sound card in the desktop. One-shot; see
 # SRC/loopback/aes67-loopback.sh for what it does and why it is separate.
-#   docker build -f 'PODS/POD:THICK/plugin/plugin:AES67/Docker/Dockerfile.loopback' -t apk-aes67-loopback:local .
+#   docker build -f 'PODS/POD:THICK/plugin/PLUGIN:AES67/Docker/Dockerfile.loopback' -t apk-aes67-loopback:local .
 # The build context is the REPO ROOT, like every plugin image, so the COPY
 # source is the real pod path.
 #
@@ -12,5 +12,5 @@
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends kmod \
     && rm -rf /var/lib/apt/lists/*
-COPY ["PODS/POD:THICK/plugin/plugin:AES67/SRC/loopback/aes67-loopback.sh", "/usr/local/bin/aes67-loopback"]
+COPY ["PODS/POD:THICK/plugin/PLUGIN:AES67/SRC/loopback/aes67-loopback.sh", "/usr/local/bin/aes67-loopback"]
 ENTRYPOINT ["/usr/local/bin/aes67-loopback"]

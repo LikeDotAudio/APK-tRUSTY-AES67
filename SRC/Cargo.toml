@@ -32,7 +32,7 @@ alsa = "0.9"
 # getifaddrs for the interface list, clock_gettime for CLOCK_MONOTONIC_RAW / CLOCK_TAI.
 libc = "0.2"
 # RAVENNA session advertisement (src/ravenna.rs) — the same crate and
-# version plugin:DANTE and plugin:RAVENNA browse with.
+# version PLUGIN:DANTE and PLUGIN:RAVENNA browse with.
 mdns-sd = "0.20"
 rumqttc = "0.24"
 serde = { version = "1", features = ["derive"] }
