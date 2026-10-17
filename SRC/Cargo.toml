@@ -16,13 +16,13 @@
 name = "apkaudio-aes67"
 version = "0.1.0"
 edition.workspace = true
-workspace = "../../../discovery/SRC"
+workspace = "../../../DISCOVERY.Engine/SRC"
 description = "AES67 / SMPTE ST 2110-30 transmitter and receiver bridged to an ALSA sound card"
 
 [dependencies]
 # The container entry point in src/bin/apk-aes67.rs.
-apk-plugin-runner = { path = "../../../discovery/SRC/RUNNER" }
-apkaudio-contracts = { path = "../../../BareMetal/SRC/contracts/rust" }
+apk-plugin-runner = { path = "../../../DISCOVERY.Engine/SRC/RUNNER" }
+apkaudio-contracts = { path = "../../../NODE.BareMetal/SRC/contracts/rust" }
 # ALSA, the same version SOUNDCARD_IN / SOUNDCARD_OUT open their cards with.
 cpal = "0.15"
 # Card and PCM names for /config ("ALC897 Analog", "HDMI 0"), read over the
@@ -32,7 +32,7 @@ alsa = "0.9"
 # getifaddrs for the interface list, clock_gettime for CLOCK_MONOTONIC_RAW / CLOCK_TAI.
 libc = "0.2"
 # RAVENNA session advertisement (src/ravenna.rs) — the same crate and
-# version PLUGIN:DANTE and PLUGIN:RAVENNA browse with.
+# version PLUGIN.DANTE and PLUGIN.RAVENNA browse with.
 mdns-sd = "0.20"
 rumqttc = "0.24"
 serde = { version = "1", features = ["derive"] }

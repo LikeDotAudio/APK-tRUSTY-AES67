@@ -6,7 +6,7 @@ AES67 and SMPTE ST 2110-30 **senders and receivers, bridged to an ALSA sound car
 |---|---|
 | **Recipe** | `Docker/docker-compose.yml`. There is no Dockerfile here: the container runs `apk-aes67` from the shared plugin image that `discovery` builds |
 | **Source** | `SRC/` is the crate `apkaudio-aes67`, a member of `discovery/SRC/Cargo.toml` |
-| **Started by** | the runner, with the rest of the plugins: `python3 'PODS/K8:runner.py' up`. The discovery stack `include:`s this compose file, and its `sound`/`aes67` profiles are in DockTor's default role list |
+| **Started by** | the runner, with the rest of the plugins: `python3 'PODS/POD.manager/MANAGER.Docktor/bin/K8:runner.py' up`. The discovery stack `include:`s this compose file, and its `sound`/`aes67` profiles are in DockTor's default role list |
 | **Profiles** | `sound` (with the other card plugins), `aes67` (alone) |
 | **Web** | `http://<node>:8130/status`, `/config`, `/api/*`. The port comes from `APK_AES67_HTTP_PORT` |
 | **Needs** | `/dev/snd`, group `audio`, `NET_BIND_SERVICE` (PTP on 319/320), host networking (multicast) |

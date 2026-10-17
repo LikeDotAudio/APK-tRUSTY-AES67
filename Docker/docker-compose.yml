@@ -1,15 +1,15 @@
-# PLUGIN:AES67 — AES67 / SMPTE ST 2110-30 senders and receivers bridged to an ALSA sound card, one container.
+# PLUGIN.AES67 — AES67 / SMPTE ST 2110-30 senders and receivers bridged to an ALSA sound card, one container.
 #
-# STARTED BY THE RUNNER WITH THE REST OF THE PLUGINS. discovery/Docker/docker-compose.yml
+# STARTED BY THE RUNNER WITH THE REST OF THE PLUGINS. DISCOVERY.Engine/Docker/docker-compose.yml
 # `include:`s this file, and DockTor reads the plugin roles off those files'
 # `profiles:` (_common.sh::plugin_roles_declared), so `sound` and `aes67` are in the
 # default role list and an ordinary mount builds and starts it:
-#     python3 'PODS/K8:runner.py' up
+#     python3 'PODS/POD.manager/MANAGER.Docktor/bin/K8:runner.py' up
 #     xdg-open http://127.0.0.1:8130/config        # 16 senders × 16 receivers, up to 8 channels each
 # By hand, alone (the same service, no other plugin):
-#     COMPOSE_PROFILES=aes67 docker compose -f 'PODS/POD:THICK/plugin/PLUGIN:AES67/Docker/docker-compose.yml' up -d --build
+#     COMPOSE_PROFILES=aes67 docker compose -f 'PODS/POD.THICK/PLUGINS/PLUGIN.AES67/Docker/docker-compose.yml' up -d --build
 # The image, the capability floor, the broker variables and the healthcheck are
-# the base service in discovery/Docker/plugin-base.yml; this file says only
+# the base service in DISCOVERY.Engine/Docker/plugin-base.yml; this file says only
 # what is THIS plugin's.
 
 # ONE PROJECT WITH THE REST (`apk-audio`), so the plugins clump with the node.
@@ -24,7 +24,7 @@ services:
   aes67-loopback:
     build:
       context: "../../../../.."
-      dockerfile: "PODS/POD:THICK/plugin/PLUGIN:AES67/Docker/Dockerfile.loopback"
+      dockerfile: "PODS/POD.THICK/PLUGINS/PLUGIN.AES67/Docker/Dockerfile.loopback"
     image: apk-aes67-loopback:local
     container_name: Plugin-AES67-Loopback
     profiles: [sound, aes67]
@@ -45,7 +45,7 @@ services:
 
   aes67:
     extends:
-      file: "../../../discovery/Docker/plugin-base.yml"
+      file: "../../../DISCOVERY.Engine/Docker/plugin-base.yml"
       service: plugin-host
     container_name: Plugin-AES67
     command: ["apk-aes67"]
@@ -58,7 +58,7 @@ services:
     # can be raised alone.
     profiles: [sound, aes67]
     # PTP's UDP 319/320 are below 1024. The binary carries the matching FILE
-    # capability (discovery/Docker/Dockerfile); without this line it is not in
+    # capability (DISCOVERY.Engine/Docker/Dockerfile); without this line it is not in
     # the bounding set and the daemon falls back to CLOCK_TAI, saying so.
     cap_add: [NET_BIND_SERVICE]
     # The card, and only this container's.
