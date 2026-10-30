@@ -27,5 +27,5 @@ The rules this plugin keeps, each pointed at the code that keeps it. Ecosystem r
 ## Where the code falls short
 
 - **The contract's leaves do not follow the `topic` key.** `Agent/*`, `incoming/*` and `outgoing/command` are built by the contracts crate from the module token (`contracts/rust/src/baremetal_io.rs`, `module_topic`; `agent_state.rs`), always under `APK.audio/System/Protocols/aes67`. That is the contract's design (one identity per module); moving `topic` moves `config`, `status` and this plugin's own live leaves, not those.
-- **The web agent never calls `apk_plugin_runner::tick()`.** Only the daemon loop ticks (`SRC/src/bus.rs`, `run_daemon_agent`), so a wedged HTTP listener that does not return is not caught by the runner's stall watchdog.
+- **Only the daemon loop ticks** (`SRC/src/bus.rs`, `run_daemon_agent`). The web agent's accept loop waits on an idle port by design and hands each request its own thread, so it has no pass to tick on; a wedged request thread is not caught, and since the runner's tick is one process-wide clock, a tick there would be masked by the daemon's anyway.
 - **The clock is not a boundary clock.** User-space timestamps after `recv` get to tens of µs; sample-accurate alignment needs `ptp4l` + `phc2sys` on the host and Clock = System.
