@@ -16,6 +16,8 @@ AES67 and SMPTE ST 2110-30 **senders and receivers, bridged to an ALSA sound car
 
 **First run:** on `/config`, pick the capture and playback devices. ALSA's `default` can be a device that won't open, such as an HDMI output with nothing connected. Then enable the senders and receivers you want.
 
+**Wiki:** [Documentation/README.md](Documentation/README.md) — principles (with the code that keeps each), architecture, delivery.
+
 ## A rewrite of aes67-linux-daemon, turned inside out
 
 [bondagit/aes67-linux-daemon](https://github.com/bondagit/aes67-linux-daemon) loads the RAVENNA kernel module. That module creates a **virtual** ALSA card, steers the card's clock from a PTP slave in the kernel, and a C++ daemon with a web UI configures it. None of that can run in a plugin container, which has a read-only root, runs as uid 1000 and cannot load kernel modules. So this plugin keeps the function and changes the structure:
@@ -134,7 +136,7 @@ cargo test -p apkaudio-aes67     # 30 unit tests: clock, ring, rtp, sdp, sap, ra
 cargo build -p apkaudio-aes67    # the binary apk-aes67; it binds ports, so run it in its container
 ```
 
-Checked 2026-10-30: `cargo test -p apkaudio-aes67` — 30 passed.
+Checked 2026-10-30: `cargo test -p apkaudio-aes67` — 31 passed.
 
 ## Philosophy
 
