@@ -1,0 +1,6 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  ci:
+    uses: LikeDotAudio/APK.plugin.SDK/.github/workflows/plugin-ci.yml@main
+    secrets: inherit
