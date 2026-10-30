@@ -17,6 +17,11 @@
 //! COMMANDS arrive on `outgoing/command` (a one-shot leaf in the contract) and
 //! go through the same `Daemon::apply` the web page uses. The outcome is
 //! published, not retained, at `<topic>/CommandResult`.
+//!
+//! `<topic>` IS CONFIG.INI'S `topic` KEY, read the way the runner reads it
+//! ([`apk_plugin_runner::module_topic`], `APK_PLUGIN_CONFIG` honoured), so the
+//! retained `<topic>/config` the runner publishes and the live `Stream/`,
+//! `Clock`, `Audio` and `CommandResult` leaves can never part company.
 
 use crate::daemon;
 use apkaudio_contracts::agent_state::AgentReport;
@@ -29,7 +34,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 pub const MODULE: &str = "aes67";
-const TOPIC: &str = "APK.audio/System/Protocols/aes67";
+
+/// The plugin's topic: `config.ini`'s `[aes67] topic`, from the same text the
+/// runner publishes (`APK_PLUGIN_CONFIG` if it names a readable file, else the
+/// compiled-in file), so the config and the live leaves share one root.
+pub fn topic() -> &'static str {
+    static TOPIC: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TOPIC.get_or_init(|| {
+        let text = std::env::var("APK_PLUGIN_CONFIG")
+            .ok()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .unwrap_or_else(|| crate::config::CONFIG_INI.to_string());
+        topic_from_ini(&text)
+    })
+}
+
+fn topic_from_ini(text: &str) -> String {
+    apk_plugin_runner::module_topic(&apk_plugin_runner::ini_to_json(text), MODULE)
+}
 const RESTATE: Duration = Duration::from_secs(5);
 /// The agent report is retained, so it is re-sent only when it changes — and
 /// once a minute anyway, in case the broker lost its store.
@@ -83,7 +105,7 @@ pub fn run_daemon_agent(host: &str, port: u16) {
                                 Ok(ok) => json!({"ok": true, "result": ok}),
                                 Err(e) => json!({"ok": false, "error": e}),
                             };
-                            let _ = client.try_publish(format!("{TOPIC}/CommandResult"), QoS::AtMostOnce, false, body.to_string());
+                            let _ = client.try_publish(format!("{}/CommandResult", topic()), QoS::AtMostOnce, false, body.to_string());
                         }
                         _ => {}
                     }
@@ -127,7 +149,7 @@ pub fn run_daemon_agent(host: &str, port: u16) {
 
 fn restate(client: &Client, status: &Value) {
     let say = |leaf: &str, v: &Value| {
-        let _ = client.try_publish(format!("{TOPIC}/{leaf}"), QoS::AtMostOnce, false, v.to_string());
+        let _ = client.try_publish(format!("{}/{leaf}", topic()), QoS::AtMostOnce, false, v.to_string());
     };
     say("Clock", &status["clock"]);
     say("Audio", &status["audio"]);
@@ -171,7 +193,7 @@ fn publish_changed_streams(client: &Client, status: &Value, sent: &mut BTreeMap<
     for (kind, list) in [("Source", &status["sources"]), ("Sink", &status["sinks"])] {
         for item in list.as_array().into_iter().flatten() {
             if let Some(id) = item["config"]["id"].as_u64() {
-                now.insert(format!("{TOPIC}/Stream/{kind}/{id}"), stream_document(kind, item).to_string());
+                now.insert(format!("{}/Stream/{kind}/{id}", topic()), stream_document(kind, item).to_string());
             }
         }
     }
@@ -190,6 +212,19 @@ fn publish_changed_streams(client: &Client, status: &Value, sent: &mut BTreeMap<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_live_leaves_follow_config_ini_topic_key() {
+        // The shipped file and the runner agree on one root.
+        assert_eq!(topic_from_ini(crate::config::CONFIG_INI), "APK.audio/System/Protocols/aes67");
+        // Moving the key moves the live leaves with it (LOOSE-aes67-bus).
+        let moved = "[aes67]\nenabled = true\ntopic = Bench/Left/aes67\n";
+        assert_eq!(topic_from_ini(moved), "Bench/Left/aes67");
+        assert_eq!(
+            topic_from_ini(moved),
+            apk_plugin_runner::module_topic(&apk_plugin_runner::ini_to_json(moved), "aes67")
+        );
+    }
 
     #[test]
     fn a_stream_document_carries_no_counters() {
