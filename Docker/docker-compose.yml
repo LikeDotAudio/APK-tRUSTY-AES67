@@ -16,6 +16,10 @@
 # ONE PROJECT WITH THE REST (`apk-audio`), so the plugins clump with the node.
 name: apk-audio
 
+# IN THE POD: the discovery engine's compose file must `include:` this one, and
+# DockTor's K8/plugin-includes.sh fails when it does not (PLAN-3395.01).
+x-apk-plugin: true
+
 services:
   # ONE-SHOT, BEFORE THE PLUGIN: loads the host's snd-aloop so the network is
   # a sound card in the desktop (SRC/loopback/aes67-loopback.sh). The only
