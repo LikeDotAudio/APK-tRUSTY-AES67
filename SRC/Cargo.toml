@@ -20,8 +20,8 @@ description = "AES67 / SMPTE ST 2110-30 transmitter and receiver bridged to an A
 
 [dependencies]
 # The container entry point in src/bin/apk-aes67.rs.
-apk-plugin-runner = { git = "https://github.com/LikeDotAudio/APK.plugin.SDK", tag = "sdk-v0.3" }
-apkaudio-contracts = { git = "https://github.com/LikeDotAudio/APK.plugin.SDK", tag = "sdk-v0.3" }
+apk-plugin-runner = { git = "https://github.com/LikeDotAudio/APK.plugin.SDK", tag = "sdk-v0.4" }
+apkaudio-contracts = { git = "https://github.com/LikeDotAudio/APK.plugin.SDK", tag = "sdk-v0.4" }
 # ALSA, the same version SOUNDCARD_IN / SOUNDCARD_OUT open their cards with.
 cpal = "0.15"
 # Card and PCM names for /config ("ALC897 Analog", "HDMI 0"), read over the
