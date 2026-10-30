@@ -32,6 +32,12 @@ services:
       dockerfile: "PODS/POD.THICK/PLUGINS/PLUGIN.AES67/Docker/Dockerfile.loopback"
     image: apk-aes67-loopback:local
     container_name: Plugin-AES67-Loopback
+    # WHAT THIS IS, said by the container itself (PLAN-3409.01): DockTor reads
+    # these with docker inspect, so its purpose and endpoint panes keep no list.
+    labels:
+      audio.apk.purpose: "One-shot: loads the host's snd-aloop virtual sound card for AES67"
+      audio.apk.purpose.what: "aes67-loopback runs once before Plugin-AES67 with CAP_SYS_MODULE, no network and the host's /lib/modules read-only: modprobe snd-aloop id=AES67 unless that card exists. Always exits 0 — Exited (0) is its healthy state."
+      audio.apk.purpose.why: "It is what makes the AES67 network appear in the desktop's sound settings as 'Loopback'. Without it the plugin still runs, on physical cards only."
     profiles: [sound, aes67]
     restart: "no"
     network_mode: none
@@ -53,6 +59,14 @@ services:
       file: "../../../DISCOVERY.Engine/Docker/plugin-base.yml"
       service: plugin-host
     container_name: Plugin-AES67
+    # WHAT THIS IS, said by the container itself (PLAN-3409.01): DockTor reads
+    # these with docker inspect, so its purpose and endpoint panes keep no list.
+    labels:
+      audio.apk.purpose: "AES67 / SMPTE ST 2110-30 senders and receivers on a sound card"
+      audio.apk.purpose.what: "apk-aes67 on host networking with /dev/snd: 16 senders and 16 receivers of up to 8 channels each, a user-space PTPv2 slave on UDP 319/320 (NET_BIND_SERVICE), SAP announce and browse, and its own pages at :8130/status and :8130/config. Settings live on the apk-audio-aes67-state volume."
+      audio.apk.purpose.why: "It puts this machine's sound card on the AES67 / ST 2110 network: capture channels out as multicast streams, and other devices' streams out of its outputs."
+      audio.apk.endpoint.1: "open http://127.0.0.1:${APK_AES67_HTTP_PORT:-8130}/status AES67 / ST 2110-30 status"
+      audio.apk.endpoint.2: "open http://127.0.0.1:${APK_AES67_HTTP_PORT:-8130}/config AES67 / ST 2110-30 configuration"
     command: ["apk-aes67"]
     # AFTER the loopback card exists: `devices: /dev/snd` is resolved when the
     # container is CREATED, so a card that appears later is not in it.
