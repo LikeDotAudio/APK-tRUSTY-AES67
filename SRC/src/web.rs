@@ -10,6 +10,16 @@
 //! rule was waiting on. Same shape as the discovery engine's dashboard: std
 //! TcpListener, a thread per request, pages compiled in.
 //!
+//! LOOPBACK, AND THE GATEWAY IN FRONT (PLAN-3403.01). The listener binds
+//! `APK_AES67_HTTP_BIND` (default 127.0.0.1): the container is host-networked,
+//! so 0.0.0.0 was every interface on the bench, outside the gateway's sign-in.
+//! The browser reaches it at `/plugins/aes67/ui/` on the one published port;
+//! Portal-Gateway dials NODE.BareMetal's relay socket (`aes67.sock`), which
+//! dials this port on the host's loopback. Caddy strips the prefix, so every
+//! URL the pages use is RELATIVE (`api/status`, `style.css`, `config`) and the
+//! same page works at `http://127.0.0.1:8130/config` and under the prefix.
+//! The `/` redirect's Location is relative for the same reason.
+//!
 //! WRITES CAN BE GATED: with `APK_AES67_TOKEN` set, every PUT/POST/DELETE needs
 //! `Authorization: Bearer <token>` (or `X-APK-Token`). Unset, the API is open
 //! to whoever can reach the port — the same trust the LAN's AES67 gear extends.
@@ -51,20 +61,35 @@ pub fn http_port() -> u16 {
         .unwrap_or_else(|| daemon::global().settings().http_port)
 }
 
+/// The address the listener binds. Loopback unless the operator widens it on
+/// purpose; a value that does not parse is loopback too, said in the log.
+pub fn http_bind() -> std::net::IpAddr {
+    let raw = std::env::var("APK_AES67_HTTP_BIND").unwrap_or_default();
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return std::net::IpAddr::from([127, 0, 0, 1]);
+    }
+    raw.parse().unwrap_or_else(|_| {
+        eprintln!("⚠️  [aes67] web: APK_AES67_HTTP_BIND={raw:?} is not an address; binding 127.0.0.1");
+        std::net::IpAddr::from([127, 0, 0, 1])
+    })
+}
+
 /// The web agent. Never returns: a port that will not bind is retried, so a
 /// conflict shows up as a log line and a missing page, not a restart loop.
 pub fn run_web_agent(_host: &str, _port: u16) {
     let port = http_port();
+    let bind = http_bind();
     let listener = loop {
-        match TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))) {
+        match TcpListener::bind(SocketAddr::new(bind, port)) {
             Ok(l) => break l,
             Err(e) => {
-                eprintln!("⚠️  [aes67] web: cannot bind :{port} ({e}); retrying in 10 s");
+                eprintln!("⚠️  [aes67] web: cannot bind {bind}:{port} ({e}); retrying in 10 s");
                 std::thread::sleep(Duration::from_secs(10));
             }
         }
     };
-    println!("🌐 [aes67] status http://0.0.0.0:{port}/status · config http://0.0.0.0:{port}/config");
+    println!("🌐 [aes67] status http://{bind}:{port}/status · config http://{bind}:{port}/config · via the gateway /plugins/aes67/ui/");
     for stream in listener.incoming().flatten() {
         let _ = std::thread::Builder::new().name("aes67:http".into()).spawn(move || handle(stream));
     }
@@ -142,7 +167,7 @@ fn respond(stream: &mut TcpStream, code: u16, ctype: &str, body: &[u8]) {
         "HTTP/1.1 {code} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n\
          Access-Control-Allow-Origin: *\r\nConnection: close\r\n{}\r\n",
         body.len(),
-        if code == 302 { "Location: /status\r\n" } else { "" }
+        if code == 302 { "Location: status\r\n" } else { "" }
     );
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(body);

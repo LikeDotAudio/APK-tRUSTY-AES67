@@ -9,7 +9,7 @@ AES67 and SMPTE ST 2110-30 **senders and receivers, bridged to an ALSA sound car
 | **Family / Category** | PLUGINS — audio transport; one of the `sound` plugins with SOUNDCARD_IN/OUT |
 | **Started by** | the runner, with the rest of the plugins: `python3 'PODS/POD.manager/MANAGER.Docktor/bin/K8:runner.py' up`. `DISCOVERY.Engine/Docker/docker-compose.yml` `include:`s this compose file, and its `sound`/`aes67` profiles are in DockTor's default role list |
 | **Profiles** | `sound` (with the other card plugins), `aes67` (alone) |
-| **Web** | `http://<node>:8130/status`, `/config` (also `/senders`, `/receivers` — one page, the path picks the tab), `/matrix`, `/api/*`. The port comes from `APK_AES67_HTTP_PORT`, else `http_port` |
+| **Web** | `https://apk.local/plugins/aes67/ui/` through the gateway — `status`, `config` (also `senders`, `receivers` — one page, the path picks the tab), `matrix`, `api/*`. On the bench itself also `http://127.0.0.1:8130/…`. The listener binds `APK_AES67_HTTP_BIND` (default `127.0.0.1`); the port comes from `APK_AES67_HTTP_PORT`, else `http_port`. `ui_path` in `config.ini` names the gateway path in the plugin's `incoming/api` |
 | **Other ports** | UDP 319/320 (PTP), 9875 (SAP), TCP `rtsp_port` 8554 (RAVENNA DESCRIBE), the RTP multicast groups — all on the host network |
 | **Needs** | `/dev/snd`, group `audio`, `NET_BIND_SERVICE` (PTP on 319/320), host networking (multicast) |
 | **Keeps** | `apk-audio-aes67-state`, a volume that holds `settings.json`, which is what `/config` saves |
@@ -106,7 +106,15 @@ Each buffer grows automatically to at least 1.5 × the largest burst the card ha
 
 ## Why this plugin has its own port
 
-Plugins normally describe themselves read-only through the node's one gateway. This plugin is configured by a person: 32 slots, device pickers and pasted SDPs. That needs a form and a writable store, which is why it has its own port and volume. Set `APK_AES67_TOKEN` to require `Authorization: Bearer <token>` (or `X-APK-Token: <token>`) on every PUT, POST and DELETE — except `POST /api/sources/sdp`, the SDP preview, which changes nothing.
+Plugins normally describe themselves read-only through the node's one gateway. This plugin is configured by a person: 32 slots, device pickers and pasted SDPs. That needs a form and a writable store, which is why it has its own port and volume.
+
+The port is not a door of its own (PLAN-3403.01). It binds the host's loopback, and browsers reach it at `/plugins/aes67/ui/` on the gateway's one published port, behind the gateway's credential for writes. The path from the browser to the page:
+
+1. Portal-Gateway (WEB.Traffic-Router) matches `/plugins/aes67/ui/*`, strips the prefix, and dials `unix//run/apk-frames/aes67.sock` (`APK_AES67_UPSTREAM`).
+2. NODE.BareMetal's relay (`Node-FramesRelay`, host network) holds that socket and dials `127.0.0.1:8130`. A socket is used because a host firewall drops bridge-to-host connections.
+3. `web.rs` answers as it would on `:8130` directly. Every URL in the pages is relative (`api/status`, `style.css`, `config`) and the `/` redirect's `Location` is relative, so the same page works at the root and under the prefix.
+
+Set `APK_AES67_TOKEN` to require `Authorization: Bearer <token>` (or `X-APK-Token: <token>`) on every PUT, POST and DELETE — except `POST /api/sources/sdp`, the SDP preview, which changes nothing.
 
 | Route | |
 |---|---|

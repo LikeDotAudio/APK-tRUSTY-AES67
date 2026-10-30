@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AES67 Matrix</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="style.css">
 <style>
   :root { --x: 18px; --live: var(--ok); --idle: #ea580c; --na: color-mix(in srgb, var(--line) 30%, transparent); }
   @media (prefers-color-scheme: dark) { :root { --idle: #fb923c; } }
@@ -45,7 +45,7 @@
 <body>
 <header>
   <h1>AES67 / ST 2110-30 <small id="node">matrix</small></h1>
-  <nav><a href="/status">Status</a><a class="on" href="/matrix">MATRIX</a><a href="/config">Config</a><a href="/senders">Senders</a><a href="/receivers">Receivers</a></nav>
+  <nav><a href="status">Status</a><a class="on" href="matrix">MATRIX</a><a href="config">Config</a><a href="senders">Senders</a><a href="receivers">Receivers</a></nav>
   <span class="spacer"></span>
   <span class="chip" id="summary">loading…</span>
 </header>
@@ -232,7 +232,7 @@ $('mx').addEventListener('click', ev => {
   }
   paint();
   const snapshot = JSON.parse(JSON.stringify(S));
-  saving = saving.then(() => api('PUT', '/api/settings', snapshot))
+  saving = saving.then(() => api('PUT', 'api/settings', snapshot))
     .then(() => banner(describe(r, c) + ' — applied', true))
     .catch(e => { S = JSON.parse(before); topo = ''; paint(); banner(e.message); });
 });
@@ -258,19 +258,19 @@ $('hide-off').onchange = () => { pref('apk-aes67-matrix-hide', $('hide-off').che
 
 async function tick() {
   try {
-    ST = await (await fetch('/api/status')).json();
+    ST = await (await fetch('api/status')).json();
     $('node').textContent = `${ST.node.name} · matrix`;
     paint();
   } catch (e) { $('summary').textContent = 'disconnected'; }
 }
-api('GET', '/api/settings').then(j => { S = j.settings; paint(); tick(); })
+api('GET', 'api/settings').then(j => { S = j.settings; paint(); tick(); })
   .catch(e => banner('Could not load settings: ' + e.message));
 setInterval(tick, 1000);
 // Settings changed on /config or over the bus are picked up here too.
 setInterval(async () => {
   try {
     await saving; // never read back over a click that is still being saved
-    const j = await api('GET', '/api/settings');
+    const j = await api('GET', 'api/settings');
     if (JSON.stringify(j.settings) !== JSON.stringify(S)) { S = j.settings; paint(); }
   } catch (e) {}
 }, 5000);
