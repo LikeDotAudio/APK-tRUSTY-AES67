@@ -15,14 +15,13 @@
 [package]
 name = "apkaudio-aes67"
 version = "0.1.0"
-edition.workspace = true
-workspace = "../../../DISCOVERY.Engine/SRC"
+edition = "2024"
 description = "AES67 / SMPTE ST 2110-30 transmitter and receiver bridged to an ALSA sound card"
 
 [dependencies]
 # The container entry point in src/bin/apk-aes67.rs.
-apk-plugin-runner = { path = "../../../DISCOVERY.Engine/SRC/RUNNER" }
-apkaudio-contracts = { path = "../../../NODE.BareMetal/SRC/contracts/rust" }
+apk-plugin-runner = { git = "https://github.com/LikeDotAudio/APK.plugin.SDK", tag = "sdk-v0.1" }
+apkaudio-contracts = { git = "https://github.com/LikeDotAudio/APK.plugin.SDK", tag = "sdk-v0.1" }
 # ALSA, the same version SOUNDCARD_IN / SOUNDCARD_OUT open their cards with.
 cpal = "0.15"
 # Card and PCM names for /config ("ALC897 Analog", "HDMI 0"), read over the

@@ -1,3 +1,5 @@
 target/
 __pycache__/
 *.pyc
+# A standalone `cargo check` writes this; the image builds from the engine's lock (PLAN-3397.01).
+/SRC/Cargo.lock
