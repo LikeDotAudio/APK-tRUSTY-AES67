@@ -112,17 +112,19 @@ Plugins normally describe themselves read-only through the node's one gateway. T
 
 The port is not a door of its own (PLAN-3403.01). It binds the host's loopback, and browsers reach it at `/plugins/aes67/ui/` on the gateway's one published port, behind the gateway's credential for writes. The path from the browser to the page:
 
-1. Portal-Gateway (WEB.Traffic-Router) matches `/plugins/aes67/ui/*`, strips the prefix, and dials `unix//run/apk-frames/aes67.sock` (`APK_AES67_UPSTREAM`).
+1. Portal-Gateway (WEB.Traffic-Router) routes by prefix: `/plugins/<token>/ui/*` strips the prefix and dials the relay socket `<token>.sock` — here `unix//run/apk-frames/aes67.sock`. There is no per-plugin upstream variable any more (`APK_AES67_UPSTREAM` is gone); `APK_PLUGIN_UI_DIR` re-points the socket folder for every plugin at once.
 2. NODE.BareMetal's relay (`Node-FramesRelay`, host network) holds that socket and dials `127.0.0.1:8130`. A socket is used because a host firewall drops bridge-to-host connections.
-3. `web.rs` answers as it would on `:8130` directly. Every URL in the pages is relative (`api/status`, `style.css`, `config`) and the `/` redirect's `Location` is relative, so the same page works at the root and under the prefix.
+3. `web.rs` answers as it would on `:8130` directly. Every URL in the pages is relative (`api/v1/status`, `style.css`, `config`) and the `/` redirect's `Location` is relative, so the same page works at the root and under the prefix.
 
 Set `APK_AES67_TOKEN` to require `Authorization: Bearer <token>` (or `X-APK-Token: <token>`) on every PUT, POST and DELETE — except `POST /api/sources/sdp`, the SDP preview, which changes nothing.
 
-| Route | |
+Every route is under **`/api/v1/`** (the pages call it); the unversioned `/api/…` spelling is the same handler, kept for one release and retired at crate 0.3.0, and any other version (`/api/v2/…`) is refused by name. A change of meaning is a new version beside v1. The settings document carries `schema` (`SETTINGS_SCHEMA`, `config.rs`): a file without it is the v1 shape, a newer one is refused rather than half-read, and every save writes the current number.
+
+| Route (under `/api/v1/`) | |
 |---|---|
 | `GET /api/status` | the live numbers: clock, audio and every stream's counters |
 | `GET` / `PUT /api/settings` | the whole settings document (and the slot limits); a PUT is validated, saved to `APK_AES67_STATE`, and reconciled |
-| `GET /api/devices`, `/api/interfaces`, `/api/browse` | ALSA devices, network interfaces, the SAP sessions heard (`sap.rs` `Browser`) |
+| `GET /api/devices`, `/api/interfaces`, `/api/browse` | ALSA devices, network interfaces, the SAP sessions heard (`sap.rs` `Browser`; the header itself is read by the shared `apkaudio_ravenna::sap`) |
 | `GET` / `POST /api/sources`, `GET` / `PUT` / `DELETE /api/sources/{id}` (and the same for `sinks`) | one stream, edited through the same validate-save-reconcile as a full PUT |
 | `GET /api/sources/{id}/sdp` | a running sender's SDP |
 | `POST /api/sources/sdp` | preview the SDP a form row would produce |
@@ -132,7 +134,7 @@ Set `APK_AES67_TOKEN` to require `Authorization: Bearer <token>` (or `X-APK-Toke
 
 ```sh
 cd PODS/POD.THICK/DISCOVERY.Engine/SRC
-cargo test -p apkaudio-aes67     # 30 unit tests: clock, ring, rtp, sdp, sap, ravenna, config, net, bus, self test
+cargo test -p apkaudio-aes67     # 31 unit tests: clock, ring, rtp, sdp (against the shared corpus), sap, ravenna, config (settings schema), web (API versions), net, bus, self test
 cargo build -p apkaudio-aes67    # the binary apk-aes67; it binds ports, so run it in its container
 ```
 
@@ -141,8 +143,8 @@ Checked 2026-10-30: `cargo test -p apkaudio-aes67` — 31 passed.
 ## Philosophy
 
 - **Keep the function, change the structure.** Where the original design needs what a container cannot have — a kernel module, a virtual card, a kernel PTP slave — this plugin opens a real card, runs PTP in user space and resamples, rather than asking for privilege (`SRC/Cargo.toml` header; `SRC/src/clock.rs`, `SRC/src/ring.rs`).
-- **State the limit honestly.** The clock says it is not a boundary clock and points at `ptp4l` + `phc2sys`; a PTP port that will not bind reads `faulty` with the reason and the daemon runs on `CLOCK_TAI` (`SRC/src/clock.rs`, the `faulty` state). AM824 is refused by name rather than half-decoded (`SRC/src/sdp.rs`).
-- **Refuse what no level admits.** An ST 2110-30 sender whose rate × ptime × channels fits no conformance level, a ptime outside 125/250/333/1000/4000 µs, or a packet over 1440 bytes is refused at validation with the arithmetic (`SRC/src/config.rs` `validate`, `SRC/src/sdp.rs` `conformance_level`, `SRC/src/rtp.rs`).
+- **State the limit honestly.** The clock says it is not a boundary clock and points at `ptp4l` + `phc2sys`; a PTP port that will not bind reads `faulty` with the reason and the daemon runs on `CLOCK_TAI` (`SRC/src/clock.rs`, the `faulty` state). AM824 is refused by name rather than half-decoded (the shared `apkaudio_ravenna::sdp::parse_stream`, re-exported by `SRC/src/sdp.rs`).
+- **Refuse what no level admits.** An ST 2110-30 sender whose rate × ptime × channels fits no conformance level, a ptime outside 125/250/333/1000/4000 µs, or a packet over 1440 bytes is refused at validation with the arithmetic (`SRC/src/config.rs` `validate`, `apkaudio_ravenna::sdp::conformance_level`, `SRC/src/rtp.rs`).
 - **One door for every write.** The web page, the per-stream routes and the bus command all go through `Daemon::apply` — validate, save, reconcile (`SRC/src/daemon.rs`, `SRC/src/web.rs` `item`, `SRC/src/bus.rs`).
 - **The bus carries state, not a firehose.** Streams are retained and sent only on change, never with counters; live numbers stay on HTTP; Clock and Audio are QoS 0 and not retained (`SRC/src/bus.rs` header).
 - **An announcement is a promise.** Only a running sender is advertised over SAP or RAVENNA; a stopped one says goodbye (`SRC/src/ravenna.rs` header).

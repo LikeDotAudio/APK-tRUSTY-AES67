@@ -35,15 +35,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub const PTP_PRIMARY: Ipv4Addr = Ipv4Addr::new(224, 0, 1, 129);
-pub const EVENT_PORT: u16 = 319;
-pub const GENERAL_PORT: u16 = 320;
-
-const MSG_SYNC: u8 = 0x0;
-const MSG_DELAY_REQ: u8 = 0x1;
-const MSG_FOLLOW_UP: u8 = 0x8;
-const MSG_DELAY_RESP: u8 = 0x9;
-const MSG_ANNOUNCE: u8 = 0xB;
+// The wire is read and written by the shared AoIP PTP reader,
+// `apkaudio_ravenna::ptp` — the same parser PLUGIN.PTP monitors with — so
+// what is here is the slave: master choice, the servo, delay measurement.
+pub use apkaudio_ravenna::ptp::{EVENT_PORT, GENERAL_PORT, PTP_PRIMARY};
+use apkaudio_ravenna::ptp::{self, MessageType, PtpMessage, Variant};
 
 /// A master unheard for this long is no longer a candidate (3 × a 2 s
 /// announce interval, with slack).
@@ -163,43 +159,17 @@ impl Servo {
 
 // --------------------------------------------------------------- wire format
 
+/// A `sourcePortIdentity`: clock identity + port number.
 type PortId = [u8; 10];
 
-#[derive(Debug, Clone, Copy)]
-struct Header {
-    msg_type: u8,
-    version: u8,
-    domain: u8,
-    two_step: bool,
-    correction_ns: i128,
-    source: PortId,
-    sequence: u16,
-    log_interval: i8,
+/// A PTPv2 message off UDP, by the shared reader; anything else is `None`.
+fn read(b: &[u8]) -> Option<PtpMessage> {
+    ptp::parse(b, Variant::V2Udp).ok()
 }
 
-fn parse_header(b: &[u8]) -> Option<Header> {
-    if b.len() < 34 {
-        return None;
-    }
-    let mut source = [0u8; 10];
-    source.copy_from_slice(&b[20..30]);
-    Some(Header {
-        msg_type: b[0] & 0x0f,
-        version: b[1] & 0x0f,
-        domain: b[4],
-        two_step: b[6] & 0x02 != 0,
-        correction_ns: (i64::from_be_bytes(b[8..16].try_into().ok()?) >> 16) as i128,
-        source,
-        sequence: u16::from_be_bytes([b[30], b[31]]),
-        log_interval: b[33] as i8,
-    })
-}
-
-fn parse_timestamp(b: &[u8]) -> Option<i128> {
-    let t = b.get(0..10)?;
-    let secs = u64::from_be_bytes([0, 0, t[0], t[1], t[2], t[3], t[4], t[5]]) as i128;
-    let nanos = u32::from_be_bytes([t[6], t[7], t[8], t[9]]) as i128;
-    Some(secs * 1_000_000_000 + nanos)
+/// The message's own timestamp in nanoseconds since the PTP epoch.
+fn stamp(m: &PtpMessage) -> Option<i128> {
+    m.timestamp.map(|t| t.as_nanos())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -230,48 +200,31 @@ impl Announce {
             self.steps_removed,
         )
     }
-}
 
-fn parse_announce(b: &[u8]) -> Option<Announce> {
-    if b.len() < 64 {
-        return None;
+    /// The fields a slave ranks masters by, from the shared reader's Announce.
+    fn from_wire(a: &ptp::Announce) -> Announce {
+        Announce {
+            grandmaster: clock_id_text(&a.grandmaster_identity),
+            priority1: a.grandmaster_priority1,
+            clock_class: a.grandmaster_quality.class,
+            clock_accuracy: a.grandmaster_quality.accuracy,
+            variance: a.grandmaster_quality.offset_scaled_log_variance,
+            priority2: a.grandmaster_priority2,
+            steps_removed: a.steps_removed,
+            utc_offset: a.current_utc_offset,
+            time_source: a.time_source,
+            gm_raw: a.grandmaster_identity,
+        }
     }
-    let mut gm = [0u8; 8];
-    gm.copy_from_slice(&b[53..61]);
-    Some(Announce {
-        grandmaster: clock_id_text(&gm),
-        priority1: b[47],
-        clock_class: b[48],
-        clock_accuracy: b[49],
-        variance: u16::from_be_bytes([b[50], b[51]]),
-        priority2: b[52],
-        steps_removed: u16::from_be_bytes([b[61], b[62]]),
-        utc_offset: i16::from_be_bytes([b[44], b[45]]),
-        time_source: b[63],
-        gm_raw: gm,
-    })
 }
 
 /// `39-A7-94-FF-FE-07-CB-D0` — the spelling `a=ts-refclk` uses (RFC 7273).
 pub fn clock_id_text(id: &[u8]) -> String {
-    id.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join("-")
+    ptp::refclk_clock_id(id)
 }
 
 fn port_text(p: &PortId) -> String {
     format!("{}:{}", clock_id_text(&p[..8]), u16::from_be_bytes([p[8], p[9]]))
-}
-
-fn build_delay_req(domain: u8, me: &PortId, seq: u16) -> [u8; 44] {
-    let mut b = [0u8; 44];
-    b[0] = MSG_DELAY_REQ;
-    b[1] = 2;
-    b[2..4].copy_from_slice(&44u16.to_be_bytes());
-    b[4] = domain;
-    b[20..30].copy_from_slice(me);
-    b[30..32].copy_from_slice(&seq.to_be_bytes());
-    b[32] = 1; // control: Delay_Req
-    b[33] = 0x7f;
-    b
 }
 
 /// EUI-64 from the interface MAC; a fixed port number so a ptp4l on the same
@@ -470,69 +423,67 @@ impl Clock {
     }
 
     fn on_event(&self, b: &[u8], t2: i128) {
-        let Some(h) = parse_header(b) else { return };
-        if h.version != 2 || h.msg_type != MSG_SYNC {
+        let Some(m) = read(b) else { return };
+        if m.message_type != MessageType::Sync {
             return;
         }
         let mut s = self.lock();
-        if h.domain != self.domain {
+        if m.domain != self.domain {
             s.counts.foreign_domain += 1;
             return;
         }
         s.counts.sync += 1;
-        if s.selected != Some(h.source) {
+        if s.selected != Some(m.source_port()) {
             return;
         }
-        s.sync_log_interval = h.log_interval;
-        if h.two_step {
-            s.pending = Some((h.sequence, t2, h.correction_ns));
-        } else if let Some(t1) = parse_timestamp(&b[34..]) {
-            s.pair(t1 + h.correction_ns, t2);
+        s.sync_log_interval = m.log_message_interval;
+        if m.is_two_step() {
+            s.pending = Some((m.sequence_id, t2, m.correction_whole_ns()));
+        } else if let Some(t1) = stamp(&m) {
+            s.pair(t1 + m.correction_whole_ns(), t2);
         }
     }
 
     fn on_general(&self, b: &[u8]) {
-        let Some(h) = parse_header(b) else { return };
-        if h.version != 2 {
-            return;
-        }
+        let Some(m) = read(b) else { return };
         let mut s = self.lock();
-        if h.domain != self.domain {
+        if m.domain != self.domain {
             s.counts.foreign_domain += 1;
             return;
         }
-        match h.msg_type {
-            MSG_ANNOUNCE => {
+        let source = m.source_port();
+        match m.message_type {
+            MessageType::Announce => {
                 s.counts.announce += 1;
-                if let Some(a) = parse_announce(b) {
-                    s.masters.insert(h.source, (a, Instant::now()));
+                if let Some(a) = &m.announce {
+                    s.masters.insert(source, (Announce::from_wire(a), Instant::now()));
                     s.choose_master();
                 }
             }
-            MSG_FOLLOW_UP => {
+            MessageType::FollowUp => {
                 s.counts.follow_up += 1;
-                if s.selected != Some(h.source) {
+                if s.selected != Some(source) {
                     return;
                 }
-                if let (Some((seq, t2, corr)), Some(t1)) = (s.pending, parse_timestamp(&b[34..])) {
-                    if seq == h.sequence {
+                if let (Some((seq, t2, corr)), Some(t1)) = (s.pending, stamp(&m)) {
+                    if seq == m.sequence_id {
                         s.pending = None;
-                        s.pair(t1 + corr + h.correction_ns, t2);
+                        s.pair(t1 + corr + m.correction_whole_ns(), t2);
                     }
                 }
             }
-            MSG_DELAY_RESP => {
-                if b.len() < 54 || b[44..54] != self.my_port {
+            MessageType::DelayResp => {
+                if m.requesting_port() != Some(self.my_port) {
                     return;
                 }
                 s.counts.delay_resp += 1;
-                s.delay_log_interval = h.log_interval;
-                let (Some((seq, t3)), Some(t4)) = (s.delay_req, parse_timestamp(&b[34..])) else { return };
-                if seq != h.sequence || !s.servo.init {
+                s.delay_log_interval = m.log_message_interval;
+                let (Some((seq, t3)), Some(t4)) = (s.delay_req, stamp(&m)) else { return };
+                if seq != m.sequence_id || !s.servo.init {
                     return;
                 }
                 s.delay_req = None;
-                let t4 = t4 - h.correction_ns;
+                let t4 = t4 - m.correction_whole_ns();
                 let Some((t1, t2)) = s.last_pair else { return };
                 // Both local stamps through the virtual clock, so the drift
                 // between the Sync and the Delay_Req cancels.
@@ -564,7 +515,7 @@ impl Clock {
         if !has_master {
             return Duration::from_secs(1);
         }
-        let packet = build_delay_req(self.domain, &self.my_port, seq);
+        let packet = ptp::encode_delay_req(self.domain, &self.my_port, seq);
         let t3 = mono_raw_ns();
         if socket.send_to(&packet, SocketAddrV4::new(PTP_PRIMARY, EVENT_PORT)).is_ok() {
             let mut s = self.lock();
@@ -683,21 +634,27 @@ mod tests {
     #[test]
     fn a_delay_req_is_the_shape_a_master_answers() {
         let me = my_port_id(Some("00:1d:c1:11:22:33"));
-        let b = build_delay_req(3, &me, 77);
-        let h = parse_header(&b).unwrap();
-        assert_eq!((h.msg_type, h.version, h.domain, h.sequence), (MSG_DELAY_REQ, 2, 3, 77));
-        assert_eq!(&h.source[..8], &[0x00, 0x1d, 0xc1, 0xff, 0xfe, 0x11, 0x22, 0x33]);
+        let m = read(&ptp::encode_delay_req(3, &me, 77)).unwrap();
+        assert_eq!((m.message_type, m.version, m.domain, m.sequence_id), (MessageType::DelayReq, 2, 3, 77));
+        assert_eq!(&m.source_port()[..8], &[0x00, 0x1d, 0xc1, 0xff, 0xfe, 0x11, 0x22, 0x33]);
+    }
+
+    /// An Announce off the wire, through the shared reader, ranked here.
+    fn announce(priority1: u8, class: u8) -> Announce {
+        let mut raw = [0u8; 64];
+        raw[1] = 2; // versionPTP
+        raw[0] = 0xB; // Announce
+        raw[47] = priority1;
+        raw[48] = class;
+        raw[52] = 128;
+        Announce::from_wire(read(&raw).unwrap().announce.as_ref().unwrap())
     }
 
     #[test]
     fn the_better_announce_wins() {
-        let mut raw = [0u8; 64];
-        raw[47] = 128;
-        raw[48] = 248;
-        raw[52] = 128;
-        let worse = parse_announce(&raw).unwrap();
-        raw[47] = 100;
-        let better = parse_announce(&raw).unwrap();
+        let worse = announce(128, 248);
+        let better = announce(100, 248);
         assert!(better.rank() < worse.rank());
+        assert_eq!(worse.grandmaster, "00-00-00-00-00-00-00-00");
     }
 }

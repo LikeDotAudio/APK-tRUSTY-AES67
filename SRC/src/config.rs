@@ -28,9 +28,19 @@ pub fn state_path() -> String {
     std::env::var("APK_AES67_STATE").unwrap_or_else(|_| "/var/lib/apkaudio/aes67/settings.json".to_string())
 }
 
+/// The settings file's shape version (2026-10-30 audit). Written into every
+/// save; a file without it predates the field and is the v1 shape. A file
+/// with a GREATER number was written by a newer build and is refused by name
+/// (the defaults run, the status page says why) rather than half-read. When
+/// the shape changes: bump this, and teach [`migrate`] the step from the old
+/// number — never reinterpret an old number's fields.
+pub const SETTINGS_SCHEMA: u32 = 1;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// [`SETTINGS_SCHEMA`] of the build that wrote the file.
+    pub schema: u32,
     pub node_name: String,
     pub interface: String,
     pub sample_rate: u32,
@@ -136,9 +146,28 @@ pub struct Sink {
     pub map: Vec<Option<u16>>,
 }
 
+/// Read a settings file of any schema this build knows, as the current shape.
+/// Absent `schema` is 1 (files saved before the field existed). Newer than
+/// [`SETTINGS_SCHEMA`] is refused by name.
+pub fn migrate(text: &str) -> Result<Settings, String> {
+    let value: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let schema = value.get("schema").and_then(|v| v.as_u64()).unwrap_or(1);
+    if schema > SETTINGS_SCHEMA as u64 {
+        return Err(format!(
+            "schema {schema} was written by a newer build (this one reads up to {SETTINGS_SCHEMA}); not loaded"
+        ));
+    }
+    // v1 is the first versioned shape: nothing to step yet. A v2 adds
+    // `1 => value = v1_to_v2(value)` here.
+    let mut s: Settings = serde_json::from_value(value).map_err(|e| e.to_string())?;
+    s.schema = SETTINGS_SCHEMA;
+    Ok(s)
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            schema: SETTINGS_SCHEMA,
             node_name: String::new(),
             interface: String::new(),
             sample_rate: 48_000,
@@ -269,7 +298,7 @@ impl Settings {
         let defaults = Settings::from_ini(CONFIG_INI);
         match std::fs::read_to_string(state_path()) {
             Err(_) => (defaults, None),
-            Ok(text) => match serde_json::from_str::<Settings>(&text) {
+            Ok(text) => match migrate(&text) {
                 Ok(s) => match s.validate() {
                     Ok(()) => (s, None),
                     Err(e) => (defaults, Some(format!("{}: {e}", state_path()))),
@@ -280,13 +309,16 @@ impl Settings {
     }
 
     /// Write-then-rename, so a crash mid-save leaves the old file whole.
+    /// Always written at this build's [`SETTINGS_SCHEMA`].
     pub fn save(&self) -> Result<(), String> {
+        let current = Settings { schema: SETTINGS_SCHEMA, ..self.clone() };
+        let this = &current;
         let path = state_path();
         if let Some(dir) = std::path::Path::new(&path).parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         }
         let tmp = format!("{path}.tmp");
-        let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        let text = serde_json::to_string_pretty(this).map_err(|e| e.to_string())?;
         std::fs::write(&tmp, text).map_err(|e| format!("{tmp}: {e}"))?;
         std::fs::rename(&tmp, &path).map_err(|e| format!("{path}: {e}"))
     }
@@ -436,6 +468,18 @@ impl Source {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_settings_file_is_versioned_and_a_newer_one_is_refused() {
+        let s = Settings::from_ini(CONFIG_INI);
+        let mut v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["schema"], SETTINGS_SCHEMA);
+        // A file from before the field existed is the v1 shape.
+        v.as_object_mut().unwrap().remove("schema");
+        assert_eq!(migrate(&v.to_string()).unwrap(), s);
+        v["schema"] = serde_json::json!(SETTINGS_SCHEMA + 1);
+        assert!(migrate(&v.to_string()).unwrap_err().contains("newer build"));
+    }
 
     #[test]
     fn the_compiled_in_ini_gives_valid_defaults() {

@@ -24,7 +24,12 @@
 //! `Authorization: Bearer <token>` (or `X-APK-Token`). Unset, the API is open
 //! to whoever can reach the port — the same trust the LAN's AES67 gear extends.
 //!
-//! API
+//! API — VERSIONED (2026-10-30 audit). Every route below lives under
+//! `/api/v1/`, which the pages use; the unversioned `/api/…` spelling is the
+//! same handler, kept as an alias for one release for scripts written against
+//! it, and retires at crate 0.3.0. A change of a route's meaning is `/api/v2/`
+//! beside v1, never an edit of v1. `GET /api/v1/settings` carries the settings
+//! file's `schema` (see config.rs).
 //!   GET    /api/status                everything live
 //!   GET    /api/settings              the saved settings
 //!   PUT    /api/settings              replace them (validated, then applied)
@@ -198,9 +203,31 @@ fn authorised(req: &Request) -> bool {
     bearer == Some(token.as_str()) || req.header("x-apk-token") == Some(token.as_str())
 }
 
+/// The API version the pages use and `GET /api/v1/…` answers.
+pub const API_VERSION: &str = "v1";
+
+/// The path's segments with the API version folded away: `/api/v1/status`
+/// and the legacy `/api/status` are both `["api", "status"]`. Any other
+/// version is refused (`None`), so a client written for a later API is told
+/// so instead of being answered by v1.
+fn api_parts(path: &str) -> Option<Vec<&str>> {
+    let mut parts: Vec<&str> = path.trim_matches('/').split('/').filter(|s| !s.is_empty()).collect();
+    if parts.first() == Some(&"api") {
+        if let Some(v) = parts.get(1).filter(|v| v.len() > 1 && v.starts_with('v') && v[1..].bytes().all(|b| b.is_ascii_digit())) {
+            if *v != API_VERSION {
+                return None;
+            }
+            parts.remove(1);
+        }
+    }
+    Some(parts)
+}
+
 fn route(req: &Request) -> (u16, &'static str, Vec<u8>) {
     let d = daemon::global();
-    let parts: Vec<&str> = req.path.trim_matches('/').split('/').filter(|s| !s.is_empty()).collect();
+    let Some(parts) = api_parts(&req.path) else {
+        return err(404, format!("this build serves API {API_VERSION}, not {}", req.path));
+    };
     let method = req.method.as_str();
     if method == "OPTIONS" {
         return (200, "text/plain", Vec::new());
@@ -338,5 +365,23 @@ fn item(d: &daemon::Daemon, method: &str, kind: &str, rest: &[&str], body: &[u8]
     match d.apply(s) {
         Ok(()) => ok(json!({ "settings": d.settings() })),
         Err(e) => err(400, e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn v1_and_the_legacy_alias_are_one_route_and_other_versions_are_refused() {
+        assert_eq!(api_parts("/api/v1/sources/3/sdp"), Some(vec!["api", "sources", "3", "sdp"]));
+        assert_eq!(api_parts("/api/sources/3/sdp"), api_parts("/api/v1/sources/3/sdp"));
+        assert_eq!(api_parts("/api/v2/status"), None);
+        assert_eq!(api_parts("/config"), Some(vec!["config"]));
+        // A segment that merely starts with v is not a version.
+        assert_eq!(api_parts("/api/values"), Some(vec!["api", "values"]));
+        for page in [STATUS_HTML, CONFIG_HTML, MATRIX_HTML] {
+            assert_eq!(page.matches("api/").count(), page.matches("api/v1/").count(), "pages call api/v1/");
+        }
     }
 }

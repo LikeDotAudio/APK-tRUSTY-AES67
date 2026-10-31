@@ -193,36 +193,10 @@ fn host_label(node: &str) -> String {
     if s.is_empty() { "apk-aes67".to_string() } else { instance_name(&s) }
 }
 
-/// Percent-encoding for the `/by-name/` path segment (RFC 3986 unreserved kept).
-pub fn url_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
-}
-
-fn url_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let Some(v) = s.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok()) {
-                out.push(v);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(if b[i] == b'+' { b' ' } else { b[i] });
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
+/// Percent-encoding for the `/by-name/` path segment — the shared spelling
+/// (`apkaudio_ravenna::rtsp`) PLUGIN.RAVENNA's DESCRIBE asks with.
+pub use apkaudio_ravenna::rtsp::url_encode;
+use apkaudio_ravenna::rtsp::url_decode;
 
 /// Bind and run the RTSP server on its own thread; the flag stops it.
 fn serve(port: u16) -> std::io::Result<Arc<AtomicBool>> {

@@ -30,6 +30,13 @@ cpal = "0.15"
 alsa = "0.9"
 # getifaddrs for the interface list, clock_gettime for CLOCK_MONOTONIC_RAW / CLOCK_TAI.
 libc = "0.2"
+# THE SHARED AoIP READERS (2026-10-30 audit): SDP (`sdp`), the SAP header
+# (`sap`), PTPv2 messages (`ptp`) and the RAVENNA `/by-name/` path (`rtsp`) are
+# apkaudio-ravenna's, the one implementation PLUGIN.RAVENNA, PLUGIN.SAP,
+# PLUGIN.DANTE and PLUGIN.PTP read with. `default-features = false` takes the
+# readers only (no mDNS browse agent); `serde` derives StreamDesc / Encoding /
+# Profile for the settings file and the HTTP API.
+apkaudio-ravenna = { git = "https://github.com/LikeDotAudio/APK.plugin.discovery.RAVENNA", rev = "2695d405016ad408488a155cc28299096f188ec6", default-features = false, features = ["serde"] }
 # RAVENNA session advertisement (src/ravenna.rs) — the same crate and
 # version PLUGIN.DANTE and PLUGIN.RAVENNA browse with.
 mdns-sd = "0.20"

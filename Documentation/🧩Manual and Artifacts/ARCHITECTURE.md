@@ -21,12 +21,12 @@ How to use it and how it works inside. The repo [README](../../README.md) has th
 |---|---|
 | `daemon.rs` | The one `Daemon` (`global()`): holds `Settings`, starts/stops the clock, the card, every sender and receiver, SAP and RAVENNA. `apply` = validate → save → reconcile; `maintain` runs once a second; `health`, `status`, `command`. |
 | `config.rs` | `Settings` and its slots; `from_ini` (first boot), `load`/`save` (`APK_AES67_STATE`, default `/var/lib/apkaudio/aes67/settings.json`), `validate`. |
-| `clock.rs` | PTPv2 slave (E2E, one/two-step, BMCA over Announce, PI servo) or `CLOCK_TAI`; `media_ts` turns ns into RTP timestamps. |
+| `clock.rs` | PTPv2 slave (E2E, one/two-step, BMCA over Announce, PI servo) or `CLOCK_TAI`; `media_ts` turns ns into RTP timestamps. The wire (header, Announce, Delay_Req) is the shared `apkaudio_ravenna::ptp`, the parser PLUGIN.PTP monitors with. |
 | `audio.rs` | One ALSA capture + one playback stream (cpal) shared by every stream, with channel routes and taps. |
 | `ring.rs` | Lock-free ring, `DriftReader` (adaptive resampler), level meter. |
 | `tx.rs` / `rx.rs` | RTP out (packet goes when the media clock passes its last sample) / RTP in (silence for lost packets, late ones dropped). |
 | `rtp.rs` | L16/L24 packing, `MAX_PAYLOAD` = 1440. |
-| `sdp.rs` / `sap.rs` | SDP generate/parse (AES67 and ST 2110-30 attributes, conformance levels) / SAP announce and browse (`Browser`). |
+| `sdp.rs` / `sap.rs` | Thin over the shared AoIP readers in PLUGIN.RAVENNA's crate (`apkaudio_ravenna::{sdp, sap}`, `default-features = false, features = ["serde"]`): SDP generate/parse (AES67 and ST 2110-30 attributes, conformance levels, the corpus test) / SAP header; `sap.rs` keeps this bridge's announce and browse (`Browser`). `ravenna.rs` takes the `/by-name/` encoding from `apkaudio_ravenna::rtsp`. |
 | `ravenna.rs` | Per-sender mDNS `_rtsp._tcp` + `_ravenna_session`, and an RTSP server answering `DESCRIBE` only. |
 | `net.rs` | Interface list (getifaddrs), multicast listener and sender sockets (SO_REUSEPORT, SSM). |
 | `web.rs` + `web/*.html` | `run_web_agent`: the HTTP listener, `/status`, `/config`, `/matrix`, `/api/*`; the pages are compiled in. |

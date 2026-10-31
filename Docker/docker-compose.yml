@@ -20,6 +20,12 @@ name: apk-audio
 # DockTor's K8/plugin-includes.sh fails when it does not (PLAN-3395.01).
 x-apk-plugin: true
 
+# THE SHARED PLUGIN VOLUMES (apk-audio-logs, mac-lookup-cache) are declared once,
+# in the engine's plugin-volumes.yml — identical to their owners' declarations —
+# and included here instead of copied (2026-10-30 audit).
+include:
+  - path: "../../../DISCOVERY.Engine/Docker/plugin-volumes.yml"
+
 services:
   # ONE-SHOT, BEFORE THE PLUGIN: loads the host's snd-aloop so the network is
   # a sound card in the desktop (SRC/loopback/aes67-loopback.sh). The only
@@ -27,9 +33,11 @@ services:
   # network, read-only root, the host's modules read-only, gone in a second.
   # It always exits 0, so a host that refuses the module still gets the plugin.
   aes67-loopback:
+    # Context is this repo's own SRC/: the image needs one script from it and
+    # nothing else (2026-10-30 audit), so the repo builds it alone.
     build:
-      context: "../../../../.."
-      dockerfile: "PODS/POD.THICK/PLUGINS/PLUGIN.AES67/Docker/Dockerfile.loopback"
+      context: "../SRC"
+      dockerfile: "../Docker/Dockerfile.loopback"
     image: apk-aes67-loopback:local
     container_name: Plugin-AES67-Loopback
     # WHAT THIS IS, said by the container itself (PLAN-3409.01): DockTor reads
@@ -100,23 +108,8 @@ services:
         target: /var/lib/apkaudio/aes67
 
 volumes:
-  # LOGGER STORAGE — owned by DATABASE.volume.Log-STORAGE, which binds it onto
-  # Documentation/LOGS and is up first in the pod. NOT `external:` (PLAN-3399.01),
-  # so this file's own `up` also works on a clean host. DECLARED IDENTICAL TO
-  # THE OWNER'S bind (LOOSE-plugin-osc): compose hashes a volume's declaration,
-  # and a plain block here hashed differently from logger-storage's, so a lone
-  # `up` asked "Recreate (data will be lost)?" — yes (or -y) replaced the bind.
-  # Same hash: no prompt, and a clean-host `up` makes the right bind, not a
-  # plain volume. APKAUDIO_REPO is exported by up-stack.sh; run by hand, the
-  # commands above start in the checkout root, so $PWD is the same path.
-  apk-audio-logs:
-    name: apk-audio-logs
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: "${APKAUDIO_REPO:-${PWD}}/Documentation/LOGS"
-  mac-lookup-cache:
-    name: apk-audio-mac-lookup-cache
+  # THIS PLUGIN'S OWN VOLUME: what /config saves (the deliberate exception —
+  # its own port 8130 and its own state). The shared plugin volumes
+  # (apk-audio-logs, mac-lookup-cache) come from the include above.
   aes67-state:
     name: apk-audio-aes67-state

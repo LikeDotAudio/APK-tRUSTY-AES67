@@ -308,7 +308,7 @@ function sideState(el, s, asked, rate) {
 }
 async function refreshState() {
   try {
-    const st = await (await fetch('api/status')).json();
+    const st = await (await fetch('api/v1/status')).json();
     sideState($('cap-state'), st.audio?.capture, S.audio.capture_channels, S.sample_rate);
     sideState($('play-state'), st.audio?.playback, S.audio.playback_channels, S.sample_rate);
   } catch (e) {}
@@ -316,8 +316,8 @@ async function refreshState() {
 
 async function load() {
   const [st, dev, ifs, sap] = await Promise.all([
-    api('GET', 'api/settings'), api('GET', 'api/devices').catch(() => ({})),
-    api('GET', 'api/interfaces').catch(() => []), api('GET', 'api/browse').catch(() => []),
+    api('GET', 'api/v1/settings'), api('GET', 'api/v1/devices').catch(() => ({})),
+    api('GET', 'api/v1/interfaces').catch(() => []), api('GET', 'api/v1/browse').catch(() => []),
   ]);
   S = st.settings; LIMITS = st.limits || LIMITS; SAP = sap; openSdp.clear();
   fillForm(dev, ifs);
@@ -338,7 +338,7 @@ $('add-rx').onclick = () => {
 $('save').onclick = async () => {
   $('save').disabled = true;
   try {
-    const r = await api('PUT', 'api/settings', collect());
+    const r = await api('PUT', 'api/v1/settings', collect());
     S = r.settings; openSdp.clear(); renderTx(); renderRx();
     banner('Saved and applied.', true);
     setTimeout(refreshState, 1500);
@@ -370,7 +370,7 @@ async function showSdp(i) {
   $('sdp-text').textContent = 'Generating…'; $('sdp-meta').innerHTML = '';
   if (!dlg.open) dlg.showModal();
   try {
-    const r = await api('POST', 'api/sources/sdp', {source: src, settings: collect()});
+    const r = await api('POST', 'api/v1/sources/sdp', {source: src, settings: collect()});
     sdpText = r.sdp; $('sdp-text').textContent = r.sdp;
     const sap = r.sap || {}, rav = r.ravenna || {};
     const sapState = !sap.wanted ? 'off for this sender' : !sap.node_announces ? 'ticked, but node announcing is off (Config tab)' : `announced to ${sap.group}:${sap.port}`;
@@ -399,7 +399,7 @@ bindTable('tx', 'sources', renderTx);
 bindTable('rx', 'sinks', renderRx);
 load().catch(e => banner('Could not load settings: ' + e.message));
 setInterval(() => S && refreshState(), 3000);
-setInterval(async () => { try { SAP = await api('GET', 'api/browse'); } catch (e) {} }, 10000);
+setInterval(async () => { try { SAP = await api('GET', 'api/v1/browse'); } catch (e) {} }, 10000);
 </script>
 </body>
 </html>

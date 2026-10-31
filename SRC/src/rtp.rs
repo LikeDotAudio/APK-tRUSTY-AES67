@@ -6,8 +6,6 @@
 //! (RFC 3190 / RFC 3551). Samples cross this module as `f32` in [-1, 1] so the
 //! resampler and the mixer never see an integer width.
 
-use serde::{Deserialize, Serialize};
-
 /// The fixed RTP header, no CSRCs and no extension — what every AES67 sender
 /// emits and the only shape this receiver needs to write.
 pub const HEADER_LEN: usize = 12;
@@ -15,35 +13,9 @@ pub const HEADER_LEN: usize = 12;
 /// AES67 §7.2 / ST 2110-10: no RTP payload larger than this.
 pub const MAX_PAYLOAD: usize = 1440;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Encoding {
-    L16,
-    L24,
-}
-
-impl Encoding {
-    pub fn bytes(self) -> usize {
-        match self {
-            Encoding::L16 => 2,
-            Encoding::L24 => 3,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Encoding::L16 => "L16",
-            Encoding::L24 => "L24",
-        }
-    }
-
-    pub fn parse(word: &str) -> Option<Encoding> {
-        match word.trim().to_ascii_uppercase().as_str() {
-            "L16" => Some(Encoding::L16),
-            "L24" => Some(Encoding::L24),
-            _ => None,
-        }
-    }
-}
+/// L16 / L24 — the rtpmap encoding names, shared with the SDP reader
+/// (`apkaudio_ravenna::sdp::Encoding`, with `bytes()` per sample).
+pub use apkaudio_ravenna::sdp::Encoding;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Header {

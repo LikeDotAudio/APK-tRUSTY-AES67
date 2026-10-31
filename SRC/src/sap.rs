@@ -6,23 +6,30 @@
 //! (in AES67 mode), RAVENNA, Merging, Lawo and the original aes67-linux-daemon
 //! all speak, so it is the one this bridge speaks. The browser keeps what it
 //! hears so /config can offer "receive this" without anybody typing an SDP.
+//!
+//! The packet header is read and written by the shared AoIP reader,
+//! `apkaudio_ravenna::sap` — the same code PLUGIN.SAP listens with. What stays
+//! here is this bridge's own: the browser, the listen loop, the announcer.
 
+use apkaudio_ravenna::sap as shared;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub const GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 255);
-pub const PORT: u16 = 9875;
-const MIME: &[u8] = b"application/sdp\0";
+/// The group and port AES67 gear announces on (the shared reader's constants).
+pub const GROUP: Ipv4Addr = shared::AES67_GROUP;
+pub const PORT: u16 = shared::PORT;
+pub use shared::msg_id_hash;
 
 /// Silence this long and a remote session is forgotten, until the settings
 /// say otherwise (`sap.timeout_s`). RFC 2974 §4 suggests ten announce
 /// intervals or an hour; senders here announce every 30 s.
 const FORGET_AFTER_S: u64 = 300;
 
+/// One SDP announcement as this bridge keeps it: IPv4 origin, SDP payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Packet {
     pub deletion: bool,
@@ -31,54 +38,18 @@ pub struct Packet {
     pub sdp: String,
 }
 
+/// The wire form, by the shared writer (`apkaudio_ravenna::sap::encode`).
 pub fn encode(p: &Packet) -> Vec<u8> {
-    let mut out = Vec::with_capacity(8 + MIME.len() + p.sdp.len());
-    // V=1, IPv4, not encrypted, not compressed; T is the deletion bit.
-    out.push(0x20 | if p.deletion { 0x04 } else { 0 });
-    out.push(0); // no authentication data
-    out.extend_from_slice(&p.msg_id_hash.to_be_bytes());
-    out.extend_from_slice(&p.origin.octets());
-    out.extend_from_slice(MIME);
-    out.extend_from_slice(p.sdp.as_bytes());
-    out
+    shared::encode(p.deletion, p.msg_id_hash, p.origin, &p.sdp)
 }
 
+/// An SDP announcement from an IPv4 origin, by the shared reader
+/// (`apkaudio_ravenna::sap::parse`); anything else — encrypted, compressed,
+/// IPv6, not SDP — is not one this browser lists.
 pub fn decode(buf: &[u8]) -> Option<Packet> {
-    if buf.len() < 8 || buf[0] >> 5 != 1 {
-        return None;
-    }
-    let flags = buf[0];
-    if flags & 0x10 != 0 || flags & 0x02 != 0 || flags & 0x01 != 0 {
-        // IPv6 origin, encrypted or compressed: none of which anybody sends.
-        return None;
-    }
-    let auth_len = buf[1] as usize * 4;
-    let origin = Ipv4Addr::new(buf[4], buf[5], buf[6], buf[7]);
-    let mut rest = buf.get(8 + auth_len..)?;
-    // The payload type is optional; a payload that starts `v=0` has none.
-    if !rest.starts_with(b"v=0") {
-        let nul = rest.iter().position(|b| *b == 0)?;
-        if &rest[..nul] != b"application/sdp" {
-            return None;
-        }
-        rest = &rest[nul + 1..];
-    }
-    Some(Packet {
-        deletion: flags & 0x04 != 0,
-        msg_id_hash: u16::from_be_bytes([buf[2], buf[3]]),
-        origin,
-        sdp: String::from_utf8_lossy(rest).to_string(),
-    })
-}
-
-/// A 16-bit hash of the SDP, so a change of version is a new message id and a
-/// receiver that caches by (origin, hash) notices it (RFC 2974 §5).
-pub fn msg_id_hash(sdp: &str) -> u16 {
-    let mut h: u32 = 0x811c_9dc5;
-    for b in sdp.bytes() {
-        h = (h ^ b as u32).wrapping_mul(0x0100_0193);
-    }
-    (h ^ (h >> 16)) as u16
+    let p = shared::parse(buf).ok().filter(|p| p.is_sdp())?;
+    let IpAddr::V4(origin) = p.origin else { return None };
+    Some(Packet { deletion: p.is_delete, msg_id_hash: p.msg_id, origin, sdp: p.payload })
 }
 
 #[derive(Debug, Clone, Serialize)]

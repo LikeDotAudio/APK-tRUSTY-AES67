@@ -139,7 +139,7 @@ function renderTx(list, dt) {
       <td class="num ${run && l.underruns ? 'warn' : ''}">${run ? fmt(l.underruns) : '—'}</td>
       <td class="num">${run ? fmt(l.buffer_ms, 1) + ' ms' : '—'}</td><td class="num">${run ? fmt(l.trim_ppm, 1) + ' ppm' : '—'}</td>
       <td><span class="meters">${run ? meters(l.level_dbfs) : ''}</span></td>
-      <td>${run ? `<a href="api/sources/${c.id}/sdp" target="_blank">sdp</a>` : ''}</td></tr>`;
+      <td>${run ? `<a href="api/v1/sources/${c.id}/sdp" target="_blank">sdp</a>` : ''}</td></tr>`;
   }).join('');
   $('t-tx').textContent = `${on} / ${list.length}`;
   $('t-tx-s').textContent = `${fmt(pk)} packets sent`;
@@ -177,7 +177,7 @@ function renderRx(list) {
 
 async function tick() {
   try {
-    const r = await fetch('api/status');
+    const r = await fetch('api/v1/status');
     const s = await r.json();
     const now = performance.now() / 1000, dt = lastT ? now - lastT : 0; lastT = now;
     $('node').textContent = `${s.node.name} · ${s.node.interface ? s.node.interface.name + ' ' + s.node.interface.ipv4 : 'no interface'}`;
@@ -197,7 +197,7 @@ async function tick() {
 }
 async function sap() {
   try {
-    const list = await (await fetch('api/browse')).json();
+    const list = await (await fetch('api/v1/browse')).json();
     $('sap').innerHTML = list.length ? list.map(x => `<tr><td>${esc(x.name)}${x.local ? ' <span class="chip">this node</span>' : ''}</td>
       <td class="mono">${esc(x.origin)}</td>
       <td>${x.stream ? `${x.stream.encoding} ${x.stream.channels}ch ${fmt(x.stream.rate / 1000, 1)}k · ${esc(x.stream.profile)}` : `<span class="bad">${esc(x.error)}</span>`}</td>

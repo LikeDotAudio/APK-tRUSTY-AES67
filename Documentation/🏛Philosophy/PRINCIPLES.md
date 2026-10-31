@@ -9,8 +9,8 @@ The rules this plugin keeps, each pointed at the code that keeps it. Ecosystem r
 | Principle | Where the code keeps it |
 |---|---|
 | **Keep the function, change the structure.** No kernel module, no virtual card, no kernel PTP: a real ALSA card is opened, PTP runs in user space and an adaptive resampler absorbs the crystal's drift. | `SRC/Cargo.toml` header; `SRC/src/clock.rs` (`Clock::start`, line 387); `SRC/src/ring.rs` (`DriftReader::read`, line 182) |
-| **State the limit honestly.** A PTP port that will not bind reads `faulty` with the reason and the daemon runs on `CLOCK_TAI`. AM824 is refused by name rather than half-decoded. | `SRC/src/clock.rs:613` (`Status`, `faulty`); `SRC/src/sdp.rs:209` |
-| **Refuse what no level admits.** Bad ptime, an ST 2110-30 stream that fits no conformance level, or a packet over 1440 bytes is refused at validation, with the arithmetic. | `SRC/src/config.rs:303`, `:387` (`validate`), `:412` (`MAX_PAYLOAD`); `SRC/src/sdp.rs:63` (`conformance_level`) |
+| **State the limit honestly.** A PTP port that will not bind reads `faulty` with the reason and the daemon runs on `CLOCK_TAI`. AM824 is refused by name rather than half-decoded. | `SRC/src/clock.rs` (`Status`, `faulty`); `apkaudio_ravenna::sdp::parse_stream` (re-exported as `SRC/src/sdp.rs` `parse`) |
+| **Refuse what no level admits.** Bad ptime, an ST 2110-30 stream that fits no conformance level, or a packet over 1440 bytes is refused at validation, with the arithmetic. | `SRC/src/config.rs:303`, `:387` (`validate`), `:412` (`MAX_PAYLOAD`); `apkaudio_ravenna::sdp::conformance_level` |
 | **One door for every write.** The web page, the per-stream routes and the bus command all end in `Daemon::apply`: validate, save, reconcile. | `SRC/src/daemon.rs:120` (`apply`), `:534` (`command`); `SRC/src/web.rs` (`item`, `route`) |
 | **Defaults are first-boot only.** `config.ini` seeds `settings.json` once; afterwards the saved file is the truth. | `SRC/src/config.rs:229` (`Settings::from_ini`), `:268` (`Settings::load`) |
 | **The bus carries state, not a firehose.** Stream documents are retained and sent only when they change, with no counters; `Clock`/`Audio` are QoS 0, not retained, every 5 s. | `SRC/src/bus.rs:162` (`stream_document`), `:191` (`publish_changed_streams`), `:150` (`restate`) |
@@ -18,11 +18,20 @@ The rules this plugin keeps, each pointed at the code that keeps it. Ecosystem r
 | **A retained command is not a command.** A retained publish on `outgoing/command` is ignored, so it never replays on reconnect. | `SRC/src/bus.rs` (`run_daemon_agent`, the `p.retain` check) |
 | **An announcement is a promise.** Only a running sender is advertised over SAP or RAVENNA mDNS; a stopped one is unregistered (an mDNS goodbye). | `SRC/src/ravenna.rs:79` (`sync`), `:133` (`unregister`) |
 | **Never block the launch.** The `snd-aloop` loader exits 0 on every path, so a host that refuses the module still gets the plugin on its physical card. | `SRC/loopback/aes67-loopback.sh` (every `exit 0`); `Docker/docker-compose.yml` (`depends_on: service_completed_successfully`) |
+| **One reader per wire format.** SDP, the SAP header, PTPv2 messages and the RAVENNA `/by-name/` path are read and written by the shared `apkaudio_ravenna::{sdp, sap, ptp, rtsp}` — the code PLUGIN.SAP, PLUGIN.RAVENNA, PLUGIN.DANTE and PLUGIN.PTP use — not by copies; the SDP corpus is re-run here against the pinned rev. | `SRC/Cargo.toml` (`apkaudio-ravenna`, `default-features = false, features = ["serde"]`); `SRC/src/sdp.rs` test `the_pinned_reader_still_reads_the_corpus`; `SRC/src/clock.rs` "wire format" |
+| **What outlives a release is versioned.** The HTTP API is `/api/v1/…` (legacy `/api/…` aliased for one release, other versions refused); the settings file carries `schema`, a newer one is refused by name, an absent one is v1. | `SRC/src/web.rs` (`API_VERSION`, `api_parts`); `SRC/src/config.rs` (`SETTINGS_SCHEMA`, `migrate`) |
 | **Least privilege.** The plugin gets `NET_BIND_SERVICE` only (as a file capability on `apk-aes67`), `/dev/snd` and group `audio`; the loader alone gets `SYS_MODULE`, with no network. | `Docker/docker-compose.yml`; `DISCOVERY.Engine/Docker/Dockerfile` (`setcap … apk-aes67`) |
 
 ## A deliberate exception
 
 **Its own port.** The ecosystem rule is that plugins describe themselves read-only through the node's one gateway (root memory note *Plugin API over the bus*). This plugin is configured by a person — 32 slots, device pickers, pasted SDPs — so it serves its own pages and REST API on `http_port` (8130), keeps a volume (`apk-audio-aes67-state`), and gates writes with `APK_AES67_TOKEN` when it is set (`SRC/src/web.rs`, `authorised`).
+
+## Kept by design
+
+- **Its own port, volume and pages** (above): the documented exception, unchanged.
+- **The pages carry their own `style.css`, not Frontend-Assets' `apk-palette.css`.** They are served by this process at `http://127.0.0.1:8130/` on the node and through the gateway's relay under `/plugins/aes67/ui/`, with every URL relative so the same page works at both. Neither origin serves `/FrontEnd/shared/…` (that is Portal-WebStatic's), so a link to the shared palette would break the bench page, and the pages are compiled into the binary so they cannot drift from the API they call.
+- **The compose `extends` `../../../DISCOVERY.Engine/Docker/plugin-base.yml`, and the binary is built by the engine's plugin image** (workspace `[patch]` + `SRC/members/`): the house plugin pattern (`.apk.scripts/plugin_standalone.py` docstring) — one base service and one image for every plugin. The loopback loader is the exception that now builds from this repo alone (`context: ../SRC`).
+- **No `Gui/Panels/<device>` panel.** The plugin's GUI is its own pages, allowed by the port exception.
 
 ## Where the code falls short
 

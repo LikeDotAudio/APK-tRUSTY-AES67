@@ -232,7 +232,7 @@ $('mx').addEventListener('click', ev => {
   }
   paint();
   const snapshot = JSON.parse(JSON.stringify(S));
-  saving = saving.then(() => api('PUT', 'api/settings', snapshot))
+  saving = saving.then(() => api('PUT', 'api/v1/settings', snapshot))
     .then(() => banner(describe(r, c) + ' — applied', true))
     .catch(e => { S = JSON.parse(before); topo = ''; paint(); banner(e.message); });
 });
@@ -258,19 +258,19 @@ $('hide-off').onchange = () => { pref('apk-aes67-matrix-hide', $('hide-off').che
 
 async function tick() {
   try {
-    ST = await (await fetch('api/status')).json();
+    ST = await (await fetch('api/v1/status')).json();
     $('node').textContent = `${ST.node.name} · matrix`;
     paint();
   } catch (e) { $('summary').textContent = 'disconnected'; }
 }
-api('GET', 'api/settings').then(j => { S = j.settings; paint(); tick(); })
+api('GET', 'api/v1/settings').then(j => { S = j.settings; paint(); tick(); })
   .catch(e => banner('Could not load settings: ' + e.message));
 setInterval(tick, 1000);
 // Settings changed on /config or over the bus are picked up here too.
 setInterval(async () => {
   try {
     await saving; // never read back over a click that is still being saved
-    const j = await api('GET', 'api/settings');
+    const j = await api('GET', 'api/v1/settings');
     if (JSON.stringify(j.settings) !== JSON.stringify(S)) { S = j.settings; paint(); }
   } catch (e) {}
 }, 5000);
