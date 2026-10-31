@@ -70,6 +70,10 @@ services:
     # WHAT THIS IS, said by the container itself (PLAN-3409.01): DockTor reads
     # these with docker inspect, so its purpose and endpoint panes keep no list.
     labels:
+      # HOW THE DISCOVERY ENGINE RAISES IT (ROAD-3437 step 3A): its launch table
+      # is these two labels, equal to config.ini [aes67] raise/serves (check.sh raise-labels).
+      audio.apk.raise: "compose"
+      audio.apk.serves: "aes67"
       audio.apk.purpose: "AES67 / SMPTE ST 2110-30 senders and receivers on a sound card"
       audio.apk.purpose.what: "apk-aes67 on host networking with /dev/snd: 16 senders and 16 receivers of up to 8 channels each, a user-space PTPv2 slave on UDP 319/320 (NET_BIND_SERVICE), SAP announce and browse, and its own pages at :8130/status and :8130/config. Settings live on the apk-audio-aes67-state volume."
       audio.apk.purpose.why: "It puts this machine's sound card on the AES67 / ST 2110 network: capture channels out as multicast streams, and other devices' streams out of its outputs."
