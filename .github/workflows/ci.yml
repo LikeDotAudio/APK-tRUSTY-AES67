@@ -2,5 +2,5 @@ name: ci
 on: [push, pull_request]
 jobs:
   ci:
-    uses: LikeDotAudio/APK.plugin.SDK/.github/workflows/plugin-ci.yml@sdk-v0.5
+    uses: LikeDotAudio/APK.plugin.SDK/.github/workflows/plugin-ci.yml@sdk-v0.6
     secrets: inherit
