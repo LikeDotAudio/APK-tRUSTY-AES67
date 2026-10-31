@@ -34,6 +34,11 @@ The runner's self test is also reachable at run time: `GET /api/selftest`, or th
 - No image registry: `apk-plugins:local` is built on each bench.
 - Loading `snd-aloop` persistently across reboots is a manual host step (README, *Seeing the network in your desktop's sound settings*).
 
+## Delivered 2026-10-31: portable file names (no `:` `|` or case twins)
+
+- The monorepo now checks out on Windows and macOS: no tracked name holds `<>:"|?*`, a trailing dot or space, a device name or a case-only twin. Colon folders became dot folders (the POD.x convention).
+- References to the renamed folders updated (`K8.runner.py`). Docs/comments only, no behaviour change.
+
 ## Delivered from the 2026-10-30 audit
 
 PLUGIN.AES67 is one plugin (`Plugin-AES67` + the one-shot `Plugin-AES67-Loopback`) in the shared
