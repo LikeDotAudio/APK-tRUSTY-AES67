@@ -95,8 +95,40 @@ pub fn run_web_agent(_host: &str, _port: u16) {
         }
     };
     println!("🌐 [aes67] status http://{bind}:{port}/status · config http://{bind}:{port}/config · via the gateway /plugins/aes67/ui/");
-    for stream in listener.incoming().flatten() {
-        let _ = std::thread::Builder::new().name("aes67:http".into()).spawn(move || handle(stream));
+    accept_with_idle(listener, || {
+        apk_plugin_runner::tick();
+    });
+}
+
+/// How long the accept loop waits between polls of a quiet listener.
+const IDLE_EVERY: Duration = Duration::from_millis(50);
+
+/// Accept for ever, a thread per request, calling `idle` on every turn of the
+/// loop — at least every [`IDLE_EVERY`] while nobody asks (PLAN-3428.01, RP-09).
+/// The agent passes `apk_plugin_runner::tick`, so the runner's per-agent stall
+/// clock sees a listener that is still LISTENING, not only one being asked; a
+/// blocking `incoming()` never ticked, so a wedged web agent was invisible.
+/// The same shape as PLUGIN.SNMP's `http::serve_with_idle`.
+fn accept_with_idle(listener: TcpListener, idle: impl Fn()) {
+    if let Err(e) = listener.set_nonblocking(true) {
+        eprintln!("⚠️  [aes67] web: cannot poll the listener ({e}); the web agent will not tick");
+    }
+    loop {
+        idle();
+        match listener.accept() {
+            Ok((stream, _)) => {
+                // The accepted socket must block: handle() reads the request whole.
+                if stream.set_nonblocking(false).is_err() {
+                    continue;
+                }
+                let _ = std::thread::Builder::new().name("aes67:http".into()).spawn(move || handle(stream));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(IDLE_EVERY),
+            Err(e) => {
+                eprintln!("⚠️  [aes67] web: accept failed: {e}");
+                std::thread::sleep(IDLE_EVERY);
+            }
+        }
     }
 }
 
@@ -371,6 +403,27 @@ fn item(d: &daemon::Daemon, method: &str, kind: &str, rest: &[&str], body: &[u8]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_quiet_listener_still_ticks_and_survives_a_caller() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let seen = ticks.clone();
+        std::thread::spawn(move || accept_with_idle(listener, move || {
+            seen.fetch_add(1, Ordering::Relaxed);
+        }));
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(ticks.load(Ordering::Relaxed) >= 2, "no request arrived, yet the loop must keep ticking");
+        // A caller that connects and hangs up is accepted and dropped, and the
+        // loop keeps ticking after it.
+        drop(TcpStream::connect(addr).unwrap());
+        let before = ticks.load(Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(ticks.load(Ordering::Relaxed) > before, "the loop kept turning after a connection");
+    }
 
     #[test]
     fn v1_and_the_legacy_alias_are_one_route_and_other_versions_are_refused() {
