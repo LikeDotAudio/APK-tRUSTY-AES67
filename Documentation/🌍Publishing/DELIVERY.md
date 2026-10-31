@@ -30,7 +30,7 @@ The runner's self test is also reachable at run time: `GET /api/selftest`, or th
 
 ## Not automated
 
-- This repo's CI is the SDK's reusable `plugin-ci.yml@sdk-v0.7` (the tag the crate pins); the monorepo CI (`.github/workflows/ci.yml`) builds and tests nothing here, on purpose — it only FTPS-deploys the website.
+- This repo's CI is the SDK's reusable `plugin-ci.yml@sdk-v0.9` (the tag the crate pins); the monorepo CI (`.github/workflows/ci.yml`) builds and tests nothing here, on purpose — it only FTPS-deploys the website.
 - No image registry: `apk-plugins:local` is built on each bench.
 - Loading `snd-aloop` persistently across reboots is a manual host step (README, *Seeing the network in your desktop's sound settings*).
 
@@ -57,3 +57,4 @@ plugin image, with its deliberate own port 8130 and state volume (unchanged). Ve
 - **Kept by design: compose `extends` plugin-base.yml, engine-built binary** (finding 4) and **no bus panel** (finding 7) — the house plugin pattern and the documented port exception; reasons in PRINCIPLES.md.
 - **Shared readers by published tag; standalone build verified** — `apkaudio-ravenna` repinned from `rev = "2695d40…"` to `tag = "ravenna-v0.2.0"` (published by the coordinator); `git archive HEAD | tar -x` + `cargo test` outside the monorepo passes against the GitHub tags, and the workspace `cargo test -p` still passes.
 - **SDK repinned to `sdk-v0.7`** (a6d6fe1) — `SRC/Cargo.toml` takes the runner and contracts, and `.github/workflows/ci.yml` calls `plugin-ci.yml`, at the same tag; it ships `docker/plugin-volumes.yml`, so plugin CI's standalone compose check resolves. Verified 2026-10-31: `git archive HEAD` alone, `cargo test` against GitHub — 31 pass; plugin-ci's compose step reproduced (`plugin-base.yml` + `plugin-volumes.yml` from `sdk-v0.7`, `docker compose config -q`) passes.
+- **SDK `sdk-v0.9`** (PLAN-3432.01) — `SRC/Cargo.toml` takes the SDK at `tag = "sdk-v0.9"`; `.github/workflows/ci.yml` calls `plugin-ci.yml@sdk-v0.9`. Verified 2026-10-31: the tree alone (`git archive`, no `.cargo` patch) against GitHub, `cargo test --workspace --locked` in `SRC` — 32 pass; one `apkaudio-contracts` in the lock.
