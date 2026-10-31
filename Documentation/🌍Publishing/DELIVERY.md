@@ -23,7 +23,7 @@ The runner's self test is also reachable at run time: `GET /api/selftest`, or th
 
 ## Ship
 
-- **Where it lands:** a container `Plugin-AES67` (and the one-shot `Plugin-AES67-Loopback`) in the compose project `apk-audio` on a bench node, started by DockTor (`K8:runner.py up`) when the node declares the `sound` or `aes67` role. `DISCOVERY.Engine/Docker/docker-compose.yml` `include:`s this repo's compose file.
+- **Where it lands:** a container `Plugin-AES67` (and the one-shot `Plugin-AES67-Loopback`) in the compose project `apk-audio` on a bench node, started by DockTor (`K8.runner.py up`) when the node declares the `sound` or `aes67` role. `DISCOVERY.Engine/Docker/docker-compose.yml` `include:`s this repo's compose file.
 - **State:** the named volume `apk-audio-aes67-state` (`settings.json`); logs on `apk-audio-logs`.
 - **Live URL:** none on the public internet. On a bench: `https://apk.local/plugins/aes67/ui/` through the gateway, and `http://127.0.0.1:8130/` on the node itself.
 - **Source:** the repo is pushed with the monorepo's `.apk.scripts/deploy_all.py` (every submodule).

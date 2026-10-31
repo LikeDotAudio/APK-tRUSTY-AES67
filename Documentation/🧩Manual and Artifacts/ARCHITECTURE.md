@@ -6,7 +6,7 @@ How to use it and how it works inside. The repo [README](../../README.md) has th
 
 ## Using it
 
-1. Bring the plugins up: `python3 'PODS/POD.manager/MANAGER.Docktor/bin/K8:runner.py' up` (the `sound` or `aes67` role), or alone: `COMPOSE_PROFILES=aes67 docker compose -f 'PODS/POD.THICK/PLUGINS/PLUGIN.AES67/Docker/docker-compose.yml' up -d --build`.
+1. Bring the plugins up: `python3 'PODS/POD.manager/MANAGER.Docktor/bin/K8.runner.py' up` (the `sound` or `aes67` role), or alone: `COMPOSE_PROFILES=aes67 docker compose -f 'PODS/POD.THICK/PLUGINS/PLUGIN.AES67/Docker/docker-compose.yml' up -d --build`.
 2. Open `/config` — through the gateway at `https://apk.local/plugins/aes67/ui/config`, or `http://127.0.0.1:8130/config` on the bench.
 3. Pick the capture and playback devices (`hw:CARD=AES67,DEV=1` for the `snd-aloop` card), then enable senders and receivers. `/status` shows clock, card and per-stream counters; `/matrix` routes channels.
 4. From the bus: publish `{"op":"enable","kind":"source","id":1}` (or `disable`, `apply`, `reload`) on `APK.audio/System/Protocols/aes67/outgoing/command`; the answer comes once on `<topic>/CommandResult`.

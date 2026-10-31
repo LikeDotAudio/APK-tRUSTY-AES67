@@ -4,7 +4,7 @@
 # `include:`s this file, and DockTor reads the plugin roles off those files'
 # `profiles:` (_common.sh::plugin_roles_declared), so `sound` and `aes67` are in the
 # default role list and an ordinary mount builds and starts it:
-#     python3 'PODS/POD.manager/MANAGER.Docktor/bin/K8:runner.py' up
+#     python3 'PODS/POD.manager/MANAGER.Docktor/bin/K8.runner.py' up
 #     xdg-open https://apk.local/plugins/aes67/ui/config   # 16 senders × 16 receivers, up to 8 channels each
 #     (or http://127.0.0.1:8130/config on the bench itself — the listener is loopback-only)
 # By hand, alone (the same service, no other plugin):
