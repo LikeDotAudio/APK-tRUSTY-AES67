@@ -29,6 +29,5 @@ Score key: 3 meets the standard · 2 minor gaps · 1 significant gaps · 0 absen
 ## Findings
 1. **Good — clean adapters.** Each vendor library sits in exactly one module (grep: `cpal::`/`alsa::` → `audio.rs`; `mdns_sd` → `ravenna.rs`; `rumqttc` → `bus.rs`). Commands from the bus and the web page go through one `Daemon::apply` (`bus.rs` header), so there is one write path.
 2. **Good — bus payload discipline.** `bus.rs` publishes configuration and state retained, never counters; live numbers stay on `GET /api/v1/status`. Topic root is read from `config.ini` the same way the runner reads it, so config and live leaves cannot diverge (tested).
-3. **Needs owner — standalone build.** The re-pinned `apkaudio-ravenna` rev resolves outside the monorepo only once PLUGIN.RAVENNA is pushed; in the monorepo the engine `[patch]` builds it today.
 
 Delivered items are recorded in [🌍Publishing/DELIVERY.md](../%F0%9F%8C%8DPublishing/DELIVERY.md#delivered-from-the-2026-10-30-audit).
