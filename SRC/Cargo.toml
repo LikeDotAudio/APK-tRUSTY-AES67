@@ -14,7 +14,7 @@
 # workspace's lockfile, so the shared plugin image builds `--locked` unchanged.
 [package]
 name = "apkaudio-aes67"
-version = "0.1.0"
+version = "2.0.0"
 edition = "2024"
 description = "AES67 / SMPTE ST 2110-30 transmitter and receiver bridged to an ALSA sound card"
 
