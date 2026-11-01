@@ -36,7 +36,7 @@ libc = "0.2"
 # PLUGIN.DANTE and PLUGIN.PTP read with. `default-features = false` takes the
 # readers only (no mDNS browse agent); `serde` derives StreamDesc / Encoding /
 # Profile for the settings file and the HTTP API.
-apkaudio-ravenna = { git = "https://github.com/LikeDotAudio/APK.plugin.discovery.RAVENNA", tag = "ravenna-v0.2.0", default-features = false, features = ["serde"] }
+apkaudio-ravenna = { git = "https://github.com/LikeDotAudio/APK.plugin.discovery.RAVENNA", tag = "ravenna-v2.0.0", default-features = false, features = ["serde"] }
 # RAVENNA session advertisement (src/ravenna.rs) — the same crate and
 # version PLUGIN.DANTE and PLUGIN.RAVENNA browse with.
 mdns-sd = "0.20"
