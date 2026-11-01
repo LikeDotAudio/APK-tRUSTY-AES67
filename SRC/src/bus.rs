@@ -105,7 +105,7 @@ pub fn run_daemon_agent(host: &str, port: u16) {
                                 Ok(ok) => json!({"ok": true, "result": ok}),
                                 Err(e) => json!({"ok": false, "error": e}),
                             };
-                            let _ = client.try_publish(format!("{}/CommandResult", topic()), QoS::AtMostOnce, false, body.to_string());
+                            apk_plugin_runner::loopback::published(client.try_publish(format!("{}/CommandResult", topic()), QoS::AtMostOnce, false, body.to_string()).is_ok());
                         }
                         _ => {}
                     }
@@ -127,7 +127,7 @@ pub fn run_daemon_agent(host: &str, port: u16) {
         if last_report.as_ref() != Some(&key) || report_at.elapsed() >= REPORT_REFRESH {
             if let Ok(report) = AgentReport::new(MODULE, state, &detail) {
                 for (t, payload, retain) in report.on(interfaces).publications().unwrap_or_default() {
-                    let _ = client.try_publish(t, QoS::AtLeastOnce, retain, payload);
+                    apk_plugin_runner::loopback::published(client.try_publish(t, QoS::AtLeastOnce, retain, payload).is_ok());
                 }
             }
             last_report = Some(key);
@@ -149,7 +149,7 @@ pub fn run_daemon_agent(host: &str, port: u16) {
 
 fn restate(client: &Client, status: &Value) {
     let say = |leaf: &str, v: &Value| {
-        let _ = client.try_publish(format!("{}/{leaf}", topic()), QoS::AtMostOnce, false, v.to_string());
+        apk_plugin_runner::loopback::published(client.try_publish(format!("{}/{leaf}", topic()), QoS::AtMostOnce, false, v.to_string()).is_ok());
     };
     say("Clock", &status["clock"]);
     say("Audio", &status["audio"]);
@@ -199,12 +199,12 @@ fn publish_changed_streams(client: &Client, status: &Value, sent: &mut BTreeMap<
     }
     for (topic, payload) in &now {
         if sent.get(topic) != Some(payload) {
-            let _ = client.try_publish(topic.clone(), QoS::AtLeastOnce, true, payload.clone());
+            apk_plugin_runner::loopback::published(client.try_publish(topic.clone(), QoS::AtLeastOnce, true, payload.clone()).is_ok());
         }
     }
     for topic in sent.keys().filter(|t| !now.contains_key(*t)) {
         // An empty retained payload is how MQTT deletes a retained message.
-        let _ = client.try_publish(topic.clone(), QoS::AtLeastOnce, true, Vec::<u8>::new());
+        apk_plugin_runner::loopback::published(client.try_publish(topic.clone(), QoS::AtLeastOnce, true, Vec::<u8>::new()).is_ok());
     }
     *sent = now;
 }

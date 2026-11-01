@@ -147,6 +147,8 @@ pub fn listen(browser: Arc<Browser>, iface: Ipv4Addr, group: Ipv4Addr, port: u16
     while !stop.load(Ordering::Relaxed) {
         match socket.recv_from(&mut buf) {
             Ok((n, _)) => {
+                // TRAFFIC (ROAD-3478): a SAP datagram, parseable or not.
+                apk_plugin_runner::loopback::packet_received();
                 if let Some(p) = decode(&buf[..n]) {
                     browser.hear(p);
                 }

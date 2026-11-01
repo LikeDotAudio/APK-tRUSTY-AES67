@@ -141,6 +141,9 @@ fn run(desc: &StreamDesc, socket: std::net::UdpSocket, ring: &Ring, clock: &Cloc
             Ok(x) => x,
             Err(_) => continue, // the 200 ms timeout: look at `stop` again
         };
+        // TRAFFIC (ROAD-3478): an RTP datagram on a subscribed sink's group,
+        // counted before the source / payload filters judge it.
+        apk_plugin_runner::loopback::packet_received();
         let IpAddr::V4(from_ip) = from.ip() else { continue };
         if desc.source_filter.is_some_and(|src| src != from_ip) {
             stats.foreign_source.fetch_add(1, Ordering::Relaxed);

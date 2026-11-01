@@ -469,6 +469,19 @@ impl Source {
 mod tests {
     use super::*;
 
+    /// The manifest the binary compiles in parses, declares the loopback port
+    /// and lists every key of config.ini's [aes67] that code reads (ROAD-3478).
+    /// Two are read by nothing and honestly counted: `enabled` and `ui_path`.
+    #[test]
+    fn the_compiled_in_manifest_parses_and_reads_every_config_key() {
+        let manifest = apkaudio_contracts::embedded_manifest!().expect("agent.toml parses");
+        assert_eq!(manifest.name, "aes67");
+        assert_eq!(manifest.telemetry_port, 8191);
+        let config = apk_plugin_runner::ini_to_json(include_str!("../config.ini"));
+        let keys: Vec<&str> = config["aes67"].as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(manifest.unread_config_keys(keys), Some(2), "[aes67] keys nothing reads: enabled, ui_path — and no others");
+    }
+
     #[test]
     fn a_settings_file_is_versioned_and_a_newer_one_is_refused() {
         let s = Settings::from_ini(CONFIG_INI);

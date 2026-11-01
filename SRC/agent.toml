@@ -1,0 +1,38 @@
+# Part of the APK.audio project — http://APK.audio — made by Anthony Kuzub
+# MIT Licence. Free, for everyone, for ever. Full text in LICENSE at the root.
+#
+# WHAT THIS AGENT IS, compiled into apk-aes67 by `manifest = "agent.toml"` in
+# src/bin/apk-aes67.rs (apkaudio_contracts::embedded_manifest!, ROAD-3478). Not
+# read at run time: the image carries the binary, not this file.
+
+[agent]
+name = "aes67"
+kind = "protocol"
+title = "AES67 / ST 2110-30 bridge"
+status = "live"
+summary = "Up to 16 AES67 / SMPTE ST 2110-30 senders and receivers bridged to an ALSA sound card, clocked by a user-space PTPv2 slave, announced and browsed over SAP."
+
+[telemetry]
+# GET /status and GET /telemetry on 127.0.0.1:8191 (host networking, so this
+# is the node's loopback and NODE.BareMetal's supervisor reads it). A PACKET is
+# one datagram taken off the wire this agent listens to: a PTP event or general
+# message (clock.rs event_loop / general_loop), a SAP datagram (sap.rs listen)
+# or an RTP datagram on a subscribed sink (rx.rs, before the source / payload
+# filters). `running` until the first, `serving` after. The web door on
+# http_port is not counted. APK_TELEMETRY_PORT moves it; 0 turns it off.
+port = 8191
+
+[config]
+# Every key of config.ini's [aes67] that code reads: `raise` by
+# apk-plugin-runner (module_raise); the rest by config.rs Settings::from_ini as
+# first-boot defaults. NOT listed, because nothing reads them: `enabled` (no
+# reader in the crate or the runner) and `ui_path` (carried verbatim in
+# incoming/api for a reader to find the gateway path; no code reads it today).
+# The manifest test asserts unread_config_keys == Some(2) for those two.
+reads = [
+    "raise",
+    "node_name", "interface", "sample_rate", "clock_source", "ptp_domain",
+    "capture_device", "playback_device", "capture_channels", "playback_channels",
+    "sap_announce", "sap_listen", "sap_interval_s", "sap_group", "sap_port", "sap_ttl", "sap_timeout_s",
+    "source_slots", "sink_slots", "http_port", "rtsp_port",
+]

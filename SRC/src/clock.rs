@@ -404,6 +404,8 @@ impl Clock {
         while !self.stop.load(Ordering::Relaxed) {
             if let Ok((n, _)) = socket.recv_from(&mut buf) {
                 let t2 = mono_raw_ns();
+                // TRAFFIC (ROAD-3478): a PTP event message off the wire.
+                apk_plugin_runner::loopback::packet_received();
                 self.on_event(&buf[..n], t2);
             }
             if Instant::now() >= next_delay_req {
@@ -417,6 +419,8 @@ impl Clock {
         let mut buf = [0u8; 1500];
         while !self.stop.load(Ordering::Relaxed) {
             if let Ok((n, _)) = socket.recv_from(&mut buf) {
+                // TRAFFIC (ROAD-3478): a PTP general message off the wire.
+                apk_plugin_runner::loopback::packet_received();
                 self.on_general(&buf[..n]);
             }
         }
