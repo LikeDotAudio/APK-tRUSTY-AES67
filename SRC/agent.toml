@@ -23,14 +23,16 @@ summary = "Up to 16 AES67 / SMPTE ST 2110-30 senders and receivers bridged to an
 port = 8191
 
 [config]
-# Every key of config.ini's [aes67] that code reads: `raise` by
-# apk-plugin-runner (module_raise); the rest by config.rs Settings::from_ini as
-# first-boot defaults. NOT listed, because nothing reads them: `enabled` (no
-# reader in the crate or the runner) and `ui_path` (carried verbatim in
-# incoming/api for a reader to find the gateway path; no code reads it today).
-# The manifest test asserts unread_config_keys == Some(2) for those two.
+# Every key of config.ini's [aes67] that code reads: `raise` and `enabled` by
+# apk-plugin-runner (module_raise; module_enabled, ROAD-3478: `false` idles the
+# process, no agent starts, and it reads stub / "disabled in config"); the rest
+# by config.rs Settings::from_ini as first-boot defaults. NOT listed, because
+# nothing reads it: `ui_path` (carried verbatim in incoming/api for an app to
+# find the gateway path — OS.plugins in POD.THIN/OS/core/api/api.js documents
+# the lookup, but no code performs it today). The manifest test asserts
+# unread_config_keys == Some(1) for it.
 reads = [
-    "raise",
+    "raise", "enabled",
     "node_name", "interface", "sample_rate", "clock_source", "ptp_domain",
     "capture_device", "playback_device", "capture_channels", "playback_channels",
     "sap_announce", "sap_listen", "sap_interval_s", "sap_group", "sap_port", "sap_ttl", "sap_timeout_s",
