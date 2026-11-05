@@ -33,30 +33,29 @@
   </div>
 
   <section><h2>Senders <span class="chip" id="tx-count"></span></h2>
-    <div class="scroll"><table>
-      <thead><tr><th>#</th><th>Name</th><th>Profile</th><th>Destination</th><th>Card ch</th><th>State</th>
-        <th class="num">Packets</th><th class="num">Mbit/s</th><th class="num">Late</th><th class="num">Underruns</th>
-        <th class="num">Buffer</th><th class="num">Drift</th><th>Level</th><th>SDP</th></tr></thead>
-      <tbody id="tx"></tbody>
-    </table></div>
+    <div class="scroll"><div class="apk-table-host" data-apk-table-host="aes67-status-senders" data-apk-opts='{"id":"aes67-status-senders","bodyId":"tx"}'>
+      <template data-apk-part="head"><tr><th>#</th><th>Name</th><th>Profile</th><th>Destination</th><th>Card ch</th><th>State</th> <th class="num">Packets</th><th class="num">Mbit/s</th><th class="num">Late</th><th class="num">Underruns</th> <th class="num">Buffer</th><th class="num">Drift</th><th>Level</th><th>SDP</th></tr></template>
+    </div></div>
   </section>
 
   <section><h2>Receivers <span class="chip" id="rx-count"></span></h2>
-    <div class="scroll"><table>
-      <thead><tr><th>#</th><th>Name</th><th>Stream</th><th>From</th><th>Format</th><th>→ Card ch</th><th>State</th>
-        <th class="num">Packets</th><th class="num">Lost</th><th class="num">Late</th><th class="num">Underruns</th>
-        <th class="num">Buffer / target</th><th class="num">Link offset</th><th class="num">Jitter</th><th class="num">Drift</th><th>Level</th></tr></thead>
-      <tbody id="rx"></tbody>
-    </table></div>
+    <div class="scroll"><div class="apk-table-host" data-apk-table-host="aes67-status-receivers" data-apk-opts='{"id":"aes67-status-receivers","bodyId":"rx"}'>
+      <template data-apk-part="head"><tr><th>#</th><th>Name</th><th>Stream</th><th>From</th><th>Format</th><th>→ Card ch</th><th>State</th> <th class="num">Packets</th><th class="num">Lost</th><th class="num">Late</th><th class="num">Underruns</th> <th class="num">Buffer / target</th><th class="num">Link offset</th><th class="num">Jitter</th><th class="num">Drift</th><th>Level</th></tr></template>
+    </div></div>
   </section>
 
   <div class="grid2">
     <section><h2>Streams on the network (SAP)</h2>
-      <div class="scroll"><table><thead><tr><th>Session</th><th>Origin</th><th>Format</th><th>Group</th><th class="num">Seen</th></tr></thead>
-      <tbody id="sap"></tbody></table></div></section>
+      <div class="scroll"><div class="apk-table-host" data-apk-table-host="aes67-status-sap" data-apk-opts='{"id":"aes67-status-sap","bodyId":"sap"}'>
+      <template data-apk-part="head"><tr><th>Session</th><th>Origin</th><th>Format</th><th>Group</th><th class="num">Seen</th></tr></template>
+    </div></div></section>
     <section><h2>Events</h2><ul class="log" id="events"></ul></section>
   </div>
 </main>
+<!-- THE ONE TABLE (FrontEnd/shared/apk-table.*, vendored and served by web.rs at
+     vendor/apk-table/; check.sh webshared). Before the page script: the hosts above
+     are adopted APKTables by the time it writes their rows. -->
+<script src="vendor/apk-table/apk-table.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));

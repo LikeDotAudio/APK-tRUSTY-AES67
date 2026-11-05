@@ -57,6 +57,11 @@ const STATUS_HTML: &str = include_str!("web/status.html");
 const CONFIG_HTML: &str = include_str!("web/config.html");
 const MATRIX_HTML: &str = include_str!("web/matrix.html");
 const STYLE_CSS: &str = include_str!("web/style.css");
+/// THE ONE TABLE (ROAD-3494): every table on the three pages is an APKTable,
+/// the copy of WEB.Frontend-Assets' /FrontEnd/shared/apk-table.* vendored here
+/// (held byte-identical by `check.sh webshared`) and served beside the pages.
+const APK_TABLE_JS: &str = include_str!("web/vendor/apk-table/apk-table.js");
+const APK_TABLE_CSS: &str = include_str!("web/vendor/apk-table/apk-table.css");
 const MAX_BODY: usize = 1 << 20;
 
 pub fn http_port() -> u16 {
@@ -278,6 +283,8 @@ fn route(req: &Request) -> (u16, &'static str, Vec<u8>) {
         ("GET", ["config" | "senders" | "receivers"]) => (200, "text/html; charset=utf-8", CONFIG_HTML.as_bytes().to_vec()),
         ("GET", ["matrix"]) => (200, "text/html; charset=utf-8", MATRIX_HTML.as_bytes().to_vec()),
         ("GET", ["style.css"]) => (200, "text/css; charset=utf-8", STYLE_CSS.as_bytes().to_vec()),
+        ("GET", ["vendor", "apk-table", "apk-table.js"]) => (200, "text/javascript; charset=utf-8", APK_TABLE_JS.as_bytes().to_vec()),
+        ("GET", ["vendor", "apk-table", "apk-table.css"]) => (200, "text/css; charset=utf-8", APK_TABLE_CSS.as_bytes().to_vec()),
         ("GET", ["api", "status"]) => ok(d.status()),
         ("GET", ["api", "settings"]) => ok(json!({
             "settings": d.settings(),
@@ -436,5 +443,29 @@ mod tests {
         for page in [STATUS_HTML, CONFIG_HTML, MATRIX_HTML] {
             assert_eq!(page.matches("api/").count(), page.matches("api/v1/").count(), "pages call api/v1/");
         }
+    }
+
+    /// THE ONE TABLE (ROAD-3494): every table on the pages is an APKTable host
+    /// under its own id, no page writes table markup itself, and the vendored
+    /// apk-table the hosts need is what the server answers at vendor/apk-table/.
+    #[test]
+    fn every_table_is_an_apktable_and_the_table_script_is_served() {
+        let ids = |page: &str| -> Vec<String> {
+            page.split("data-apk-table-host=\"").skip(1).map(|s| s[..s.find('"').unwrap()].to_string()).collect()
+        };
+        assert_eq!(ids(STATUS_HTML), ["aes67-status-senders", "aes67-status-receivers", "aes67-status-sap"]);
+        assert_eq!(ids(CONFIG_HTML), ["aes67-config-senders", "aes67-config-receivers"]);
+        assert_eq!(ids(MATRIX_HTML), ["aes67-matrix"]);
+        for page in [STATUS_HTML, CONFIG_HTML, MATRIX_HTML] {
+            assert!(!page.contains("<table"), "a page writes no <table> itself");
+            let tag = page.find("vendor/apk-table/apk-table.js").expect("loads the table script");
+            assert!(tag < page.find("<script>\n").unwrap(), "before the page's own script");
+        }
+        assert!(APK_TABLE_JS.contains("root.APKTable = api"));
+        assert!(APK_TABLE_JS.contains("function scan("));
+        let req = |path: &str| Request { method: "GET".into(), path: path.into(), headers: Vec::new(), body: Vec::new() };
+        let (code, kind, body) = route(&req("/vendor/apk-table/apk-table.js"));
+        assert_eq!((code, kind), (200, "text/javascript; charset=utf-8"));
+        assert_eq!(body, APK_TABLE_JS.as_bytes());
     }
 }

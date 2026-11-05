@@ -62,9 +62,13 @@
     <label><input type="checkbox" id="hide-off"> Hide disabled streams</label>
   </div>
   <p class="hint">Rows are what comes <b>in</b>: the sound card's capture channels and every receiver's stream channels. Columns are what goes <b>out</b>: the sound card's playback channels and every sender's stream channels. Each sender channel takes one card input; each receiver channel feeds one card output (several receivers may feed the same output, and are summed). Click a crosspoint to make it; click it again to clear it. Changes apply live, without restarting the stream.</p>
-  <div class="mxwrap"><table class="mx" id="mx"></table></div>
+  <div class="mxwrap"><div class="apk-table-host" data-apk-table-host="aes67-matrix" data-apk-opts='{"id":"aes67-matrix","className":"mx","tableId":"mx","sortable":false}'></div></div>
 </main>
 <div id="tip"></div>
+<!-- THE ONE TABLE (FrontEnd/shared/apk-table.*, vendored and served by web.rs at
+     vendor/apk-table/; check.sh webshared). Before the page script: the hosts above
+     are adopted APKTables by the time it writes their rows. -->
+<script src="vendor/apk-table/apk-table.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -149,6 +153,9 @@ function build() {
     h += '</tr>';
   });
   $('mx').innerHTML = h + '</tbody>';
+  // THE ONE TABLE: the grid is APKTable 'aes67-matrix'; a new layout is a new head
+  // and body, so the table is adopted again (sort stays off: a crosspoint grid has no order).
+  if (window.APKTable) APKTable.adopt($('mx'), {id: 'aes67-matrix', sortable: false});
   cells = rows.map((_, i) => Array.from($('mx').querySelectorAll(`td[data-r="${i}"]`)));
 }
 

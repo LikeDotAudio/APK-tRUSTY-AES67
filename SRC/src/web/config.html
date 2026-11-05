@@ -101,10 +101,9 @@
   <div class="tab" id="tab-senders">
   <section><h2>Senders <span class="chip" id="tx-limit"></span></h2>
     <p class="hint">Card channels as a list or range: <span class="mono">1-8</span>, <span class="mono">9,10</span>. Up to 8 per stream. ST 2110-30 needs a conformance level: A = 1 ms ≤ 8 ch, B/C = 125 µs.</p>
-    <div class="scroll"><table>
-      <thead><tr><th>On</th><th>#</th><th>Name</th><th>Profile</th><th>Format</th><th>Packet</th><th>Multicast group</th><th>Port</th><th>TTL</th><th>PT</th><th>Card channels</th><th title="Announce over SAP">SAP</th><th title="Advertise over mDNS + RTSP">RAVENNA</th><th></th><th></th></tr></thead>
-      <tbody id="tx"></tbody>
-    </table></div>
+    <div class="scroll"><div class="apk-table-host" data-apk-table-host="aes67-config-senders" data-apk-opts='{"id":"aes67-config-senders","bodyId":"tx"}'>
+      <template data-apk-part="head"><tr><th>On</th><th>#</th><th>Name</th><th>Profile</th><th>Format</th><th>Packet</th><th>Multicast group</th><th>Port</th><th>TTL</th><th>PT</th><th>Card channels</th><th title="Announce over SAP">SAP</th><th title="Advertise over mDNS + RTSP">RAVENNA</th><th></th><th></th></tr></template>
+    </div></div>
     <button id="add-tx" style="margin-top:10px">+ Add sender</button>
   </section>
   </div>
@@ -112,10 +111,9 @@
   <div class="tab" id="tab-receivers">
   <section><h2>Receivers <span class="chip" id="rx-limit"></span></h2>
     <p class="hint">Pick a stream heard over SAP (the receiver follows it if it moves), or paste an SDP. Routing lists the playback channel for each stream channel: <span class="mono">1-8</span>, or <span class="mono">3,4,-,-</span> to leave some unrouted.</p>
-    <div class="scroll"><table>
-      <thead><tr><th>On</th><th>#</th><th>Name</th><th>Stream</th><th>Delay (ms)</th><th>→ Playback channels</th><th></th></tr></thead>
-      <tbody id="rx"></tbody>
-    </table></div>
+    <div class="scroll"><div class="apk-table-host" data-apk-table-host="aes67-config-receivers" data-apk-opts='{"id":"aes67-config-receivers","bodyId":"rx"}'>
+      <template data-apk-part="head"><tr><th>On</th><th>#</th><th>Name</th><th>Stream</th><th>Delay (ms)</th><th>→ Playback channels</th><th></th></tr></template>
+    </div></div>
     <button id="add-rx" style="margin-top:10px">+ Add receiver</button>
   </section>
   </div>
@@ -128,6 +126,10 @@
     <button id="sdp-refresh">Refresh</button><button id="sdp-copy">Copy</button><button id="sdp-download">Download .sdp</button><button class="primary" id="sdp-close">Close</button>
   </div>
 </dialog>
+<!-- THE ONE TABLE (FrontEnd/shared/apk-table.*, vendored and served by web.rs at
+     vendor/apk-table/; check.sh webshared). Before the page script: the hosts above
+     are adopted APKTables by the time it writes their rows. -->
+<script src="vendor/apk-table/apk-table.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));

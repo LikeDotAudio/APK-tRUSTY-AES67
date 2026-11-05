@@ -1,0 +1,62 @@
+/* Part of the APK.audio project — http://APK.audio — made by Anthony Kuzub */
+/* MIT Licence. Free, for everyone, for ever. Full text in LICENSE at the root. */
+/* apk-table.css — the look of THE ONE TABLE (apk-table.js). Colours come from
+   the contract tokens (apk-tokens.css: --apk-accent, --apk-state-*) and the
+   shell's ground tokens, each with a fallback, so a page without them still
+   draws a dark table. */
+
+.apk-table-wrap { display: flex; flex-direction: column; min-height: 0; flex: 1; gap: 6px; }
+.apk-table-bar { display: flex; align-items: center; gap: 6px; }
+.apk-table-bar[hidden] { display: none; }
+.apk-table-search {
+    flex: 1; min-width: 0; max-width: 260px;
+    background: var(--bg-input, #0f0f11); color: var(--text-main, #f4f4f5);
+    border: 1px solid var(--border-color, #2c2c2c); border-radius: 4px; padding: 4px 8px; font: inherit; font-size: 12px;
+}
+.apk-table-count { color: var(--text-muted, #888); font-size: 11px; margin-right: auto; }
+.apk-table-btn {
+    background: transparent; color: var(--text-muted, #888); cursor: pointer; font: inherit; font-size: 11px;
+    border: 1px solid var(--border-color, #2c2c2c); border-radius: 4px; padding: 3px 8px;
+}
+.apk-table-btn:hover { color: var(--text-main, #f4f4f5); border-color: var(--apk-accent, #f4902c); }
+
+.apk-table-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border-color, #2c2c2c); border-radius: 6px; }
+table.apk-table { width: 100%; border-collapse: collapse; font-size: 12px; color: var(--text-main, #f4f4f5); }
+table.apk-table th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--bg-input, #0f0f11); color: var(--text-muted, #888);
+    padding: 7px 10px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px;
+    border-bottom: 1px solid var(--border-color, #2c2c2c); white-space: nowrap; user-select: none;
+}
+table.apk-table th.apk-sortable { cursor: pointer; }
+table.apk-table th.apk-sortable:hover { color: var(--text-main, #f4f4f5); }
+table.apk-table th[aria-sort]::after { content: ' ▲'; color: var(--apk-accent, #f4902c); }
+table.apk-table th[aria-sort="descending"]::after { content: ' ▼'; }
+table.apk-table td { padding: 5px 10px; border-bottom: 1px solid var(--border-color, #2c2c2c); vertical-align: middle; }
+table.apk-table tbody tr:hover { background: var(--bg-surface-hover, #222226); }
+table.apk-table tr.apk-selected { background: rgba(244, 144, 44, 0.12); background: var(--apk-accent-tint, rgba(244, 144, 44, 0.12)); }
+table.apk-table .apk-align-right { text-align: right; }
+table.apk-table .apk-align-center { text-align: center; }
+table.apk-table .apk-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+table.apk-table td.apk-editable { cursor: text; }
+table.apk-table td.apk-editable:focus { outline: 1px solid var(--apk-accent, #f4902c); background: rgba(244, 144, 44, 0.08); }
+table.apk-table td.apk-editable:empty::before { content: attr(data-placeholder); color: var(--text-subtle, #52525b); }
+table.apk-table .apk-table-select {
+    background: var(--bg-input, #0f0f11); color: var(--text-main, #f4f4f5);
+    border: 1px solid var(--border-color, #2c2c2c); border-radius: 4px; padding: 2px 4px; font: inherit;
+}
+table.apk-table .apk-table-act { width: 1%; text-align: center; }
+table.apk-table .apk-table-del {
+    background: transparent; border: none; cursor: pointer; font-weight: bold; padding: 2px 6px; border-radius: 3px;
+    color: var(--apk-state-dead, #f85149);
+}
+table.apk-table .apk-table-del:hover { background: rgba(248, 81, 73, 0.18); }
+table.apk-table tr.apk-table-empty td { color: var(--text-muted, #888); text-align: center; padding: 14px; }
+
+/* A table a page draws itself, adopted (APKTable.adopt / markup / scan) or
+   registered: it keeps the page's own look; only the sort affordance is common. */
+table[data-apk-table] th.apk-sortable { cursor: pointer; }
+table[data-apk-table] th[aria-sort]::after { content: ' ▲'; color: var(--apk-accent, #f4902c); }
+table[data-apk-table] th[aria-sort="descending"]::after { content: ' ▼'; }
+table[data-apk-table] tr.apk-selected { background: var(--apk-accent-tint, rgba(244, 144, 44, 0.12)); }
+.apk-table-host { display: none; }
