@@ -20,8 +20,8 @@ description = "AES67 / SMPTE ST 2110-30 transmitter and receiver bridged to an A
 
 [dependencies]
 # The container entry point in src/bin/apk-aes67.rs.
-apk-plugin-runner = { git = "https://github.com/LikeDotAudio/APK.plugin.SDK", tag = "sdk-v2.2" }
-apkaudio-contracts = { git = "https://github.com/LikeDotAudio/APK.plugin.SDK", tag = "sdk-v2.2" }
+apk-plugin-runner = { git = "https://github.com/LikeDotAudio/APK.plugin.SDK", tag = "sdk-v2.3" }
+apkaudio-contracts = { git = "https://github.com/LikeDotAudio/APK.plugin.SDK", tag = "sdk-v2.3" }
 # ALSA, the same version SOUNDCARD_IN / SOUNDCARD_OUT open their cards with.
 cpal = "0.15"
 # Card and PCM names for /config ("ALC897 Analog", "HDMI 0"), read over the
@@ -36,7 +36,7 @@ libc = "0.2"
 # PLUGIN.DANTE and PLUGIN.PTP read with. `default-features = false` takes the
 # readers only (no mDNS browse agent); `serde` derives StreamDesc / Encoding /
 # Profile for the settings file and the HTTP API.
-apkaudio-ravenna = { git = "https://github.com/LikeDotAudio/APK.plugin.discovery.RAVENNA", tag = "ravenna-v2.2.0", default-features = false, features = ["serde"] }
+apkaudio-ravenna = { git = "https://github.com/LikeDotAudio/APK.plugin.discovery.RAVENNA", tag = "ravenna-v2.3.0", default-features = false, features = ["serde"] }
 # RAVENNA session advertisement (src/ravenna.rs) — the same crate and
 # version PLUGIN.DANTE and PLUGIN.RAVENNA browse with.
 mdns-sd = "0.20"
