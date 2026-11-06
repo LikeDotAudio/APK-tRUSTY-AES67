@@ -28,6 +28,7 @@
      APKTable.get('computer-interfaces')
        .rows() / .setRows(rows) / .sort('vlan', 'desc') / .filter('dante')
        .select(i) / .toCsv() / .exportCsv() / .copy() / .columns()
+       .toIfc() / .exportIfc()        // when the page gave ifc: { row(r, i) } (see IFC below)
 
    A table a page draws ITSELF answers the same calls:
 
@@ -85,6 +86,269 @@
         return e;
     }
 
+    /* ---------------------------------------------------------------- IFC ----
+       A table whose host page gives a row→IFC mapping (opts.ifc) also exports
+       IFC4X3_ADD2 beside CSV (ROAD-3598): the IFC button, handle.toIfc() and
+       handle.exportIfc(filename). The rows shown (filter and sort applied) each
+       become one IFC object; the host says what object:
+
+         ifc: {
+           file: 'bom',                         // download stem (default: the table id)
+           project: 'Bill of materials',        // the IfcProject's Name
+           roles: ['bom', '<doc id>'],          // GlobalId namespace (default ['table', id])
+           row(row, i) {                        // null skips the row
+             return {
+               entity: 'IfcCableSegment',       // one of IFC_ROW_ENTITIES below
+               key: row.id,                     // stable: GlobalId = ifcGuid(...roles, 'row', key)
+               name, description, objectType, tag, identification, predefined,
+               psets: { APK_Connection: { CableColour: 'Blue', Count: { value: 2, measure: 'IfcInteger' } } },
+               quantities: { Qto_CableSegmentBaseQuantities: { Length: { kind: 'LENGTH', value: 1524 } } },
+               cost: { unit: 12.5, quantity: 4, currency: 'USD' },   // IfcCostItem only
+               lifeCyclePhase: 'Operation',     // IfcPerformanceHistory only
+             };
+           },
+         }
+
+       Property sets are the host's: standard names, or APK_* sets declared in
+       DATABASE.server.BIM tools/ifc/apk_psets*.py. Elements are contained in one
+       IfcSite, controls (cost items, performance histories) declared on the
+       project. GlobalIds are the one rule (uuid5 of the roles, IFC base64:
+       contracts/src/ifc/guid.ts; held here to contracts/vectors/ifc-guid.json by
+       apk-table-ifc.test.js), so the same rows export to the same file. */
+
+    // Entity -> attribute layout, checked against IFC4X3_ADD2 (apk-table-ifc.test.js).
+    var IFC_ROW_ENTITIES = {
+        IFCAUDIOVISUALAPPLIANCE: 'element', IFCCABLESEGMENT: 'element', IFCCABLEFITTING: 'element',
+        IFCCABLECARRIERSEGMENT: 'element', IFCCOMMUNICATIONSAPPLIANCE: 'element', IFCELECTRICAPPLIANCE: 'element',
+        IFCDISTRIBUTIONBOARD: 'element', IFCOUTLET: 'element', IFCSENSOR: 'element', IFCCONTROLLER: 'element',
+        IFCFLOWINSTRUMENT: 'element', IFCBUILDINGELEMENTPROXY: 'element', IFCJUNCTIONBOX: 'element',
+        IFCACTUATOR: 'element', IFCALARM: 'element', IFCPROTECTIVEDEVICE: 'element', IFCSWITCHINGDEVICE: 'element',
+        IFCCOSTITEM: 'cost', IFCPERFORMANCEHISTORY: 'history',
+    };
+
+    var GUID_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$';
+    var GUID_NAMESPACE = '6f1d3a52-7c0b-4b8e-9a51-6b8f0a7d3e11';
+
+    function utf8(s) {
+        var out = [];
+        for (var i = 0; i < s.length; i++) {
+            var c = s.charCodeAt(i);
+            if (c >= 0xd800 && c < 0xdc00 && i + 1 < s.length) {
+                var d = s.charCodeAt(i + 1);
+                if (d >= 0xdc00 && d < 0xe000) { c = 0x10000 + ((c - 0xd800) << 10) + (d - 0xdc00); i++; }
+            }
+            if (c < 0x80) out.push(c);
+            else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+            else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+            else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+        }
+        return out;
+    }
+
+    function sha1(bytes) {
+        var h = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
+        var l = bytes.length, m = bytes.slice();
+        m.push(0x80);
+        while (m.length % 64 !== 56) m.push(0);
+        var bits = l * 8;
+        for (var s = 7; s >= 0; s--) m.push(s >= 4 ? Math.floor(bits / Math.pow(2, 8 * s)) & 255 : (bits >>> (8 * s)) & 255);
+        var w = new Array(80);
+        for (var o = 0; o < m.length; o += 64) {
+            for (var t = 0; t < 16; t++) w[t] = (m[o + 4 * t] << 24) | (m[o + 4 * t + 1] << 16) | (m[o + 4 * t + 2] << 8) | m[o + 4 * t + 3];
+            for (t = 16; t < 80; t++) { var x = w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]; w[t] = (x << 1) | (x >>> 31); }
+            var a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
+            for (t = 0; t < 80; t++) {
+                var f, k;
+                if (t < 20) { f = (b & c) | (~b & d); k = 0x5a827999; }
+                else if (t < 40) { f = b ^ c ^ d; k = 0x6ed9eba1; }
+                else if (t < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8f1bbcdc; }
+                else { f = b ^ c ^ d; k = 0xca62c1d6; }
+                var tmp = (((a << 5) | (a >>> 27)) + f + e + k + w[t]) | 0;
+                e = d; d = c; c = (b << 30) | (b >>> 2); b = a; a = tmp;
+            }
+            h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0; h[4] = (h[4] + e) | 0;
+        }
+        var out = [];
+        h.forEach(function (v) { out.push((v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255); });
+        return out;
+    }
+
+    /** The one GlobalId rule (contracts ifcGuid): uuid5(namespace, roles.join('/')) as 22 chars of IFC base64. */
+    function ifcGuid() {
+        var roles = Array.prototype.slice.call(arguments).map(text);
+        var ns = GUID_NAMESPACE.replace(/-/g, '').match(/../g).map(function (x) { return parseInt(x, 16); });
+        var b = sha1(ns.concat(utf8(roles.join('/')))).slice(0, 16);
+        b[6] = (b[6] & 0x0f) | 0x50;
+        b[8] = (b[8] & 0x3f) | 0x80;
+        // 128 bits, most significant first: 2 + 20 x 6 bits = 22 chars (the first carries 2 bits)
+        var out = GUID_ALPHABET[b[0] >> 6] + GUID_ALPHABET[b[0] & 63];
+        for (var i = 1; i < 16; i += 3) {
+            var n = (b[i] << 16) | (b[i + 1] << 8) | b[i + 2];
+            out += GUID_ALPHABET[(n >> 18) & 63] + GUID_ALPHABET[(n >> 12) & 63] + GUID_ALPHABET[(n >> 6) & 63] + GUID_ALPHABET[n & 63];
+        }
+        return out;
+    }
+
+    function stepString(v) {
+        var s = text(v), out = "'";
+        for (var i = 0; i < s.length; i++) {
+            var ch = s[i], cp = s.codePointAt(i);
+            if (cp > 0xffff) { out += '\\X4\\' + ('0000000' + cp.toString(16).toUpperCase()).slice(-8) + '\\X0\\'; i++; continue; }
+            if (ch === "'") out += "''";
+            else if (ch === '\\') out += '\\\\';
+            else if (cp >= 32 && cp < 127) out += ch;
+            else out += '\\X2\\' + ('000' + cp.toString(16).toUpperCase()).slice(-4) + '\\X0\\';
+        }
+        return out + "'";
+    }
+
+    function stepReal(x) {
+        x = Number(x);
+        if (!isFinite(x)) x = 0;
+        if (Number.isInteger(x) && Math.abs(x) < 1e21) return x.toFixed(0) + '.';
+        var s = String(x), m = /^(-?\d+)(\.\d+)?e([-+]\d+)$/.exec(s);
+        return m ? m[1] + (m[2] || '.') + 'E' + m[3].replace('+', '') : s;
+    }
+
+    var opt = function (v) { return v === null || v === undefined || v === '' ? '$' : stepString(v); };
+
+    /** A property's typed value: { value, measure } as given, else by the value's own type. */
+    function typedValue(v) {
+        var value = v, measure = null;
+        if (v && typeof v === 'object' && !Array.isArray(v)) { value = v.value; measure = v.measure || null; }
+        if (value === null || value === undefined || value === '') return null;
+        if (!measure) {
+            if (typeof value === 'boolean') measure = 'IfcBoolean';
+            else if (typeof value === 'number') measure = Number.isInteger(value) ? 'IfcInteger' : 'IfcReal';
+            else measure = text(value).length > 255 ? 'IfcText' : 'IfcLabel';
+        }
+        var M = measure.toUpperCase();
+        var body;
+        if (M === 'IFCBOOLEAN' || M === 'IFCLOGICAL') body = value === true || value === 'true' || value === 'T' ? '.T.' : '.F.';
+        else if (M === 'IFCINTEGER' || M === 'IFCCOUNTMEASURE') body = String(Math.round(Number(value) || 0));
+        else if (/^IFC(LABEL|TEXT|IDENTIFIER|DURATION|DATETIME|DATE|URIREFERENCE)$/.test(M)) body = stepString(value);
+        else body = stepReal(value);
+        return M + '(' + body + ')';
+    }
+
+    /** The rows as IFC4X3_ADD2 STEP text (the IFC export). */
+    function rowsToIfc(rows, mapping, meta) {
+        meta = meta || {};
+        var roles = mapping.roles || ['table', meta.id || 'table'];
+        var gid = function () { return ifcGuid.apply(null, roles.concat(Array.prototype.slice.call(arguments))); };
+        var lines = [], n = 0;
+        var add = function (s) { n += 1; lines.push('#' + n + '=' + s + ';'); return '#' + n; };
+        var objs = [];
+        rows.forEach(function (row, i) {
+            var o = mapping.row(row, i);
+            if (!o) return;
+            var entity = text(o.entity).toUpperCase();
+            if (!IFC_ROW_ENTITIES[entity]) throw new Error('APKTable IFC: ' + o.entity + ' is not an entity a table row can be (IFC_ROW_ENTITIES)');
+            objs.push({ o: o, entity: entity, kind: IFC_ROW_ENTITIES[entity], key: o.key !== undefined && o.key !== null && o.key !== '' ? text(o.key) : String(i) });
+        });
+        // a key two rows share (a hand-typed wire number twice) stays two objects: the later ones #2, #3 …
+        var seen = {};
+        objs.forEach(function (x) {
+            var k = x.key, m = 1;
+            while (seen[k]) { m += 1; k = x.key + '#' + m; }
+            seen[k] = true;
+            x.key = k;
+        });
+        var money = objs.some(function (x) { return x.kind === 'cost' && x.o.cost; });
+        var currency = (objs.filter(function (x) { return x.o.cost && x.o.cost.currency; })[0] || { o: { cost: { currency: 'USD' } } }).o.cost.currency;
+
+        var units = [add('IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.)')];
+        if (money) units.push(add('IFCMONETARYUNIT(' + stepString(currency) + ')'));
+        var ua = add('IFCUNITASSIGNMENT((' + units.join(',') + '))');
+        var project = add('IFCPROJECT(' + stepString(gid('project')) + ',$,' + stepString(mapping.project || meta.id || 'Table') + ',$,$,$,$,$,' + ua + ')');
+
+        var elements = [], controls = [], defs = [];
+        objs.forEach(function (x) {
+            var o = x.o, g = o.guid || gid('row', x.key);
+            var predefined = text(o.predefined || 'NOTDEFINED').toUpperCase();
+            var objectType = o.objectType || (predefined === 'USERDEFINED' ? x.entity : null);
+            var ref;
+            if (x.kind === 'element') {
+                ref = add(x.entity + '(' + [stepString(g), '$', opt(o.name), opt(o.description), opt(objectType), '$', '$', opt(o.tag), '.' + predefined + '.'].join(',') + ')');
+                elements.push(ref);
+            } else if (x.kind === 'cost') {
+                var values = '$', qty = '$';
+                if (o.cost && o.cost.unit !== undefined && o.cost.unit !== null && o.cost.unit !== '') {
+                    values = '(' + add("IFCCOSTVALUE('Unit',$,IFCMONETARYMEASURE(" + stepReal(o.cost.unit) + "),$,$,$,'Unit',$,$,$)") + ')';
+                }
+                if (o.cost && o.cost.quantity !== undefined && o.cost.quantity !== null && o.cost.quantity !== '') {
+                    // IfcCountMeasure is an INTEGER in IFC4X3_ADD2
+                    qty = '(' + add("IFCQUANTITYCOUNT('Count',$,$," + String(Math.max(0, Math.round(Number(o.cost.quantity) || 0))) + ',$)') + ')';
+                }
+                ref = add('IFCCOSTITEM(' + [stepString(g), '$', opt(o.name), opt(o.description), opt(objectType), opt(o.identification), '.' + predefined + '.', values, qty].join(',') + ')');
+                controls.push(ref);
+            } else {
+                ref = add('IFCPERFORMANCEHISTORY(' + [stepString(g), '$', opt(o.name), opt(o.description), opt(objectType), opt(o.identification), stepString(o.lifeCyclePhase || 'Operation'), '.' + predefined + '.'].join(',') + ')');
+                controls.push(ref);
+            }
+            Object.keys(o.psets || {}).forEach(function (name) {
+                var props = [];
+                Object.keys(o.psets[name]).forEach(function (p) {
+                    var v = o.psets[name][p];
+                    if (Array.isArray(v)) {
+                        var items = v.map(typedValue).filter(Boolean);
+                        if (items.length) props.push(add('IFCPROPERTYLISTVALUE(' + stepString(p) + ',$,(' + items.join(',') + '),$)'));
+                        return;
+                    }
+                    var tv = typedValue(v);
+                    if (tv) props.push(add('IFCPROPERTYSINGLEVALUE(' + stepString(p) + ',$,' + tv + ',$)'));
+                });
+                if (!props.length) return;
+                defs.push([ref, add('IFCPROPERTYSET(' + stepString(gid('pset', x.key, name)) + ',$,' + stepString(name) + ',$,(' + props.join(',') + '))'), name]);
+            });
+            if (x.kind === 'element') {
+                Object.keys(o.quantities || {}).forEach(function (name) {
+                    var qs = [];
+                    Object.keys(o.quantities[name]).forEach(function (q) {
+                        var v = o.quantities[name][q];
+                        var kind = text(v && v.kind || 'COUNT').toUpperCase();
+                        var val = Number(v && typeof v === 'object' ? v.value : v);
+                        if (!isFinite(val) || !/^(LENGTH|AREA|VOLUME|COUNT|WEIGHT)$/.test(kind)) return;
+                        var amount = kind === 'COUNT' ? String(Math.max(0, Math.round(val))) : stepReal(Math.max(0, val));
+                        qs.push(add('IFCQUANTITY' + kind + '(' + stepString(q) + ',$,$,' + amount + ',$)'));
+                    });
+                    if (qs.length) defs.push([ref, add('IFCELEMENTQUANTITY(' + stepString(gid('pset', x.key, name)) + ',$,' + stepString(name) + ',$,$,(' + qs.join(',') + '))'), name]);
+                });
+            }
+        });
+        if (elements.length) {
+            var site = add('IFCSITE(' + stepString(gid('site')) + ",$,'Site',$,$,$,$,$,$,$,$,$,$,$)");
+            add('IFCRELAGGREGATES(' + stepString(gid('rel', 'aggregates', 'site')) + ',$,$,$,' + project + ',(' + site + '))');
+            add('IFCRELCONTAINEDINSPATIALSTRUCTURE(' + stepString(gid('rel', 'contains', 'site')) + ',$,$,$,(' + elements.join(',') + '),' + site + ')');
+        }
+        if (controls.length) add('IFCRELDECLARES(' + stepString(gid('rel', 'declares', 'project')) + ',$,$,$,' + project + ',(' + controls.join(',') + '))');
+        defs.forEach(function (d) {
+            add('IFCRELDEFINESBYPROPERTIES(' + stepString(gid('rel', 'props', d[1], d[2])) + ',$,$,$,(' + d[0] + '),' + d[1] + ')');
+        });
+        var stamp = meta.timestamp || new Date().toISOString().slice(0, 19);
+        var file = (mapping.file || meta.id || 'table') + '.ifc';
+        return [
+            'ISO-10303-21;',
+            'HEADER;',
+            "FILE_DESCRIPTION(('ViewDefinition [ReferenceView]'),'2;1');",
+            'FILE_NAME(' + stepString(file) + ',' + stepString(stamp) + ",('APK.audio'),('APK.audio'),'APKTable','APK.audio','');",
+            "FILE_SCHEMA(('IFC4X3_ADD2'));",
+            'ENDSEC;',
+            'DATA;',
+        ].concat(lines, ['ENDSEC;', 'END-ISO-10303-21;', '']).join('\n');
+    }
+
+    function download(text, name, type) {
+        var blob = new root.Blob([text], { type: type });
+        var a = el('a');
+        a.href = root.URL.createObjectURL(blob);
+        a.download = name;
+        doc.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { root.URL.revokeObjectURL(a.href); }, 1000);
+    }
+
     /** Make a table in `host`. Returns its handle (also APKTable.get(id)). */
     function create(host, opts) {
         if (!host) throw new Error('APKTable.create: no host element');
@@ -123,10 +387,19 @@
         var copyBtn = el('button', 'apk-table-btn', 'Copy');
         copyBtn.type = 'button';
         copyBtn.title = 'Copy this table (tab-separated, pastes into a spreadsheet)';
+        // IFC beside CSV, only when the host says what a row is (opts.ifc.row)
+        var ifcMap = opts.ifc && typeof opts.ifc.row === 'function' ? opts.ifc : null;
+        var ifcBtn = null;
+        if (ifcMap) {
+            ifcBtn = el('button', 'apk-table-btn', 'IFC');
+            ifcBtn.type = 'button';
+            ifcBtn.title = 'Download these rows as IFC4X3_ADD2 (.ifc), one object per row';
+        }
         bar.appendChild(search);
         bar.appendChild(count);
         bar.appendChild(copyBtn);
         bar.appendChild(csvBtn);
+        if (ifcBtn) bar.appendChild(ifcBtn);
         if (opts.toolbar === false) bar.hidden = true;
 
         var scroller = el('div', 'apk-table-scroll');
@@ -312,12 +585,26 @@
                 if (root.navigator && root.navigator.clipboard) return root.navigator.clipboard.writeText(tsv).then(function () { return handle; });
                 return Promise.resolve(handle);
             },
+            /** The rows shown as IFC4X3_ADD2 (opts.ifc's row mapping), or null when the host gave none. */
+            toIfc: function (meta) {
+                if (!ifcMap) return null;
+                var m = { id: id };
+                for (var k in (meta || {})) m[k] = meta[k];
+                return rowsToIfc(visible().map(function (i) { return rows[i]; }), ifcMap, m);
+            },
+            exportIfc: function (filename) {
+                var t = handle.toIfc();
+                if (t === null) return handle;
+                download(t, filename || ((ifcMap.file || id) + '.ifc'), 'application/x-step');
+                return handle;
+            },
             render: function () { render(); return handle; },
             destroy: function () { if (registry.get(id) === handle) registry.delete(id); if (wrap.parentNode) wrap.parentNode.removeChild(wrap); },
         };
 
         search.oninput = function () { query = search.value; renderBody(); };
         csvBtn.onclick = function () { handle.exportCsv(); };
+        if (ifcBtn) ifcBtn.onclick = function () { handle.exportIfc(); };
         copyBtn.onclick = function () {
             handle.copy().then(function () { copyBtn.textContent = 'Copied'; setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1200); });
         };
@@ -782,6 +1069,10 @@
         scan: scan,
         get: function (id) { return registry.get(id) || null; },
         all: all,
+        // the IFC export's writer and GlobalId rule, for a page that has rows but no table (and the tests)
+        rowsToIfc: rowsToIfc,
+        ifcGuid: ifcGuid,
+        IFC_ROW_ENTITIES: IFC_ROW_ENTITIES,
     };
 
     // Static pages: the hosts already parsed when this script runs, and the rest
