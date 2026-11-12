@@ -65,6 +65,7 @@ From this repository's own commits (the commit message is the record):
 
 - pin sdk-v2.4 and the providers re-released on it (ROAD-3731: contracts 2.4.0 published) (`93bd24a`)
 - ROAD-3731: error/warn prints go through apk_plugin_runner::elog! (10 lines) so they reach System/Log/<token>/<level> (`81f0da1`)
+- vendor: apk-softapp / apk-table re-joined from their parts (one GENERATED banner line; ROAD-3762) (`47b8288`)
 
 ## Releases
 - **Released `2.0.0`, tag `v2.0.0`** (2026-11-01, ROAD-3452, the owner's V2) — on `sdk-v2.0` (contracts 2.0.0); every manifest says 2.0.0; GitHub release `v2.0.0`.
