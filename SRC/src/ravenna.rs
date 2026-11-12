@@ -100,7 +100,7 @@ pub fn sync(origin: Option<Ipv4Addr>, rtsp_port: u16, node: &str, sessions: Vec<
             Err(e) => {
                 let msg = format!("RTSP :{rtsp_port}: {e}");
                 if st.last_error.as_deref() != Some(msg.as_str()) {
-                    eprintln!("⚠️  [aes67] RAVENNA {msg}");
+                    apk_plugin_runner::elog!(warn, "⚠️  [aes67] RAVENNA {msg}");
                 }
                 st.last_error = Some(msg);
                 return;

@@ -155,7 +155,7 @@ pub fn listen(browser: Arc<Browser>, iface: Ipv4Addr, group: Ipv4Addr, port: u16
             }
             Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
             Err(e) => {
-                eprintln!("⚠️  [aes67] SAP receive: {e}");
+                apk_plugin_runner::elog!(warn, "⚠️  [aes67] SAP receive: {e}");
                 std::thread::sleep(Duration::from_secs(1));
             }
         }
@@ -169,7 +169,7 @@ pub fn announce(socket: &UdpSocket, origin: Ipv4Addr, to: SocketAddrV4, sdps: &[
     for sdp in sdps {
         let packet = encode(&Packet { deletion, msg_id_hash: msg_id_hash(sdp), origin, sdp: sdp.clone() });
         if let Err(e) = socket.send_to(&packet, to) {
-            eprintln!("⚠️  [aes67] SAP announce: {e}");
+            apk_plugin_runner::elog!(warn, "⚠️  [aes67] SAP announce: {e}");
         }
     }
 }

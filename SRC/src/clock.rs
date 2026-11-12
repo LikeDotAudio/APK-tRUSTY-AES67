@@ -361,7 +361,7 @@ impl Clock {
     }
 
     fn fail(&self, why: String) {
-        eprintln!("⚠️  [aes67] PTP: {why}");
+        apk_plugin_runner::elog!(warn, "⚠️  [aes67] PTP: {why}");
         *self.error.lock().unwrap_or_else(|e| e.into_inner()) = Some(why);
     }
 

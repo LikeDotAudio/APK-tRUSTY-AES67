@@ -181,7 +181,7 @@ impl Engine {
         let (capture, playback) = ready_rx.recv().unwrap_or_default();
         for side in [&capture, &playback] {
             match (&side.error, side.open) {
-                (Some(err), _) => eprintln!("⚠️  [aes67] ALSA {}: {err}", side.requested),
+                (Some(err), _) => apk_plugin_runner::elog!(warn, "⚠️  [aes67] ALSA {}: {err}", side.requested),
                 (None, true) => println!(
                     "🔊 [aes67] ALSA {} open: {} Hz × {} ch ({})",
                     side.device.as_deref().unwrap_or("?"),

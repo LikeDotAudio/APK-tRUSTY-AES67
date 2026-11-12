@@ -171,7 +171,7 @@ impl Daemon {
                 .name("aes67:sap".into())
                 .spawn(move || {
                     if let Err(e) = sap::listen(browser, ip, group, port, stop) {
-                        eprintln!("⚠️  [aes67] SAP listener: {e}");
+                        apk_plugin_runner::elog!(warn, "⚠️  [aes67] SAP listener: {e}");
                     }
                 })
                 .ok();

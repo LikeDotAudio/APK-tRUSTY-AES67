@@ -80,7 +80,7 @@ pub fn http_bind() -> std::net::IpAddr {
         return std::net::IpAddr::from([127, 0, 0, 1]);
     }
     raw.parse().unwrap_or_else(|_| {
-        eprintln!("⚠️  [aes67] web: APK_AES67_HTTP_BIND={raw:?} is not an address; binding 127.0.0.1");
+        apk_plugin_runner::elog!(warn, "⚠️  [aes67] web: APK_AES67_HTTP_BIND={raw:?} is not an address; binding 127.0.0.1");
         std::net::IpAddr::from([127, 0, 0, 1])
     })
 }
@@ -94,7 +94,7 @@ pub fn run_web_agent(_host: &str, _port: u16) {
         match TcpListener::bind(SocketAddr::new(bind, port)) {
             Ok(l) => break l,
             Err(e) => {
-                eprintln!("⚠️  [aes67] web: cannot bind {bind}:{port} ({e}); retrying in 10 s");
+                apk_plugin_runner::elog!(warn, "⚠️  [aes67] web: cannot bind {bind}:{port} ({e}); retrying in 10 s");
                 std::thread::sleep(Duration::from_secs(10));
             }
         }
@@ -116,7 +116,7 @@ const IDLE_EVERY: Duration = Duration::from_millis(50);
 /// The same shape as PLUGIN.SNMP's `http::serve_with_idle`.
 fn accept_with_idle(listener: TcpListener, idle: impl Fn()) {
     if let Err(e) = listener.set_nonblocking(true) {
-        eprintln!("⚠️  [aes67] web: cannot poll the listener ({e}); the web agent will not tick");
+        apk_plugin_runner::elog!(warn, "⚠️  [aes67] web: cannot poll the listener ({e}); the web agent will not tick");
     }
     loop {
         idle();
@@ -130,7 +130,7 @@ fn accept_with_idle(listener: TcpListener, idle: impl Fn()) {
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(IDLE_EVERY),
             Err(e) => {
-                eprintln!("⚠️  [aes67] web: accept failed: {e}");
+                apk_plugin_runner::elog!(warn, "⚠️  [aes67] web: accept failed: {e}");
                 std::thread::sleep(IDLE_EVERY);
             }
         }
